@@ -213,3 +213,42 @@ def _capture_active_window():
         return pyautogui.screenshot(region=(left, top, right - left, bottom - top))
     except ImportError:
         return pyautogui.screenshot()
+
+
+@registry.register(
+    group="screen",
+    name="region",
+    description=(
+        "Capture a specific region of the screen by coordinates. "
+        "Use when you need a specific area, not the full desktop or active window."
+    ),
+    params=[
+        CommandParam("x",      "int", True, None, "Left edge of region"),
+        CommandParam("y",      "int", True, None, "Top edge of region"),
+        CommandParam("width",  "int", True, None, "Width of region in pixels"),
+        CommandParam("height", "int", True, None, "Height of region in pixels"),
+    ]
+)
+def region(x: int, y: int, width: int, height: int) -> AgentResponse:
+    try:
+        import pyautogui
+
+        if width <= 0 or height <= 0:
+            return AgentResponse.failure("Width and height must be greater than 0.")
+
+        img = pyautogui.screenshot(region=(x, y, width, height))
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+
+        return AgentResponse.success({
+            "image_b64": b64,
+            "format":    "png",
+            "x":         x,
+            "y":         y,
+            "width":     img.width,
+            "height":    img.height,
+        })
+    except Exception as e:
+        return AgentResponse.failure(f"Region capture failed: {e}")

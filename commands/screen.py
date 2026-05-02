@@ -387,3 +387,210 @@ def monitors() -> AgentResponse:
         return AgentResponse.failure("pywin32 not installed. Run: pip install pywin32")
     except Exception as e:
         return AgentResponse.failure(f"Monitor enumeration failed: {e}")
+    
+@registry.register(
+    group="screen",
+    name="find",
+    description=(
+        "Find a UI element by text in the Accessibility Tree. "
+        "Returns position and type of the first match. "
+        "Use this instead of 'screen elements' when you know what you're looking for."
+    ),
+    params=[
+        CommandParam("text",         "string", True,  None,  "Text to search for (case-insensitive partial match)"),
+        CommandParam("type",         "string", False, None,  "Filter by element type: 'button' | 'edit' | 'link' | etc."),
+        CommandParam("enabled_only", "bool",   False, True,  "Only return enabled/interactable elements"),
+    ]
+)
+def find(text: str, type: str | None = None, enabled_only: bool = True) -> AgentResponse:
+    try:
+        from pywinauto import Desktop
+
+        active = Desktop(backend="uia").active()
+        if not active:
+            return AgentResponse.failure("No active window.")
+
+        text_lower = text.lower()
+        matches    = []
+
+        for ctrl in active.descendants():
+            try:
+                info      = ctrl.element_info
+                ctrl_type = (info.control_type or "").lower()
+                label     = (info.name or "").strip()
+                enabled   = info.enabled
+
+                if not label:
+                    continue
+                if enabled_only and not enabled:
+                    continue
+                if type and ctrl_type != type.lower():
+                    continue
+                if text_lower not in label.lower():
+                    continue
+
+                rect = info.rectangle
+                element = {
+                    "type":    ctrl_type,
+                    "label":   label,
+                    "enabled": enabled,
+                }
+                if rect:
+                    element["center"] = [
+                        (rect.left + rect.right)  // 2,
+                        (rect.top  + rect.bottom) // 2,
+                    ]
+                    element["bounds"] = {
+                        "left": rect.left, "top": rect.top,
+                        "right": rect.right, "bottom": rect.bottom,
+                    }
+                matches.append(element)
+
+            except Exception:
+                continue
+
+        if not matches:
+            return AgentResponse.success({
+                "found":   False,
+                "matches": [],
+                "count":   0,
+            })
+
+        return AgentResponse.success({
+            "found":   True,
+            "matches": matches,
+            "count":   len(matches),
+            "first":   matches[0],  # el más conveniente para el agente
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
+    except Exception as e:
+        return AgentResponse.failure(f"Find failed: {e}")
+
+
+@registry.register(
+    group="screen",
+    name="text",
+    description=(
+        "Extract all visible text from the active window in reading order. "
+        "Use when you need to read content, not interact with elements."
+    ),
+    params=[
+        CommandParam("min_length", "int", False, 2, "Ignore text shorter than this. Filters out icons and single chars."),
+    ]
+)
+def text(min_length: int = 2) -> AgentResponse:
+    try:
+        from pywinauto import Desktop
+
+        active = Desktop(backend="uia").active()
+        if not active:
+            return AgentResponse.failure("No active window.")
+
+        window_title = ""
+        try:
+            window_title = active.element_info.name or ""
+        except Exception:
+            pass
+
+        texts = []
+        for ctrl in active.descendants():
+            try:
+                info  = ctrl.element_info
+                label = (info.name or "").strip()
+                rect  = info.rectangle
+
+                if not label or len(label) < min_length:
+                    continue
+
+                # Ordenar por posición vertical luego horizontal
+                top  = rect.top  if rect else 0
+                left = rect.left if rect else 0
+                texts.append((top, left, label))
+
+            except Exception:
+                continue
+
+        # Deduplicar y ordenar en orden de lectura
+        seen   = set()
+        result = []
+        for _, _, label in sorted(texts):
+            if label not in seen:
+                seen.add(label)
+                result.append(label)
+
+        content = "\n".join(result)
+
+        return AgentResponse.success({
+            "window":  window_title,
+            "content": content,
+            "lines":   len(result),
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
+    except Exception as e:
+        return AgentResponse.failure(f"Text extraction failed: {e}")
+
+
+@registry.register(
+    group="screen",
+    name="wait",
+    description=(
+        "Wait until a UI element with the given text appears on screen. "
+        "Use after triggering an action that causes a page load, dialog, or state change."
+    ),
+    params=[
+        CommandParam("text",    "string", True,  None, "Text to wait for (case-insensitive partial match)"),
+        CommandParam("timeout", "int",    False, 10,   "Max seconds to wait before giving up"),
+        CommandParam("interval","float",  False, 0.5,  "How often to check, in seconds"),
+    ]
+)
+def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
+    try:
+        import time
+        from pywinauto import Desktop
+
+        text_lower = text.lower()
+        elapsed    = 0.0
+
+        while elapsed < timeout:
+            try:
+                active = Desktop(backend="uia").active()
+                if active:
+                    for ctrl in active.descendants():
+                        try:
+                            label = (ctrl.element_info.name or "").strip()
+                            if text_lower in label.lower():
+                                rect = ctrl.element_info.rectangle
+                                center = None
+                                if rect:
+                                    center = [
+                                        (rect.left + rect.right)  // 2,
+                                        (rect.top  + rect.bottom) // 2,
+                                    ]
+                                return AgentResponse.success({
+                                    "found":      True,
+                                    "text":       label,
+                                    "elapsed_s":  round(elapsed, 1),
+                                    "center":     center,
+                                })
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            time.sleep(interval)
+            elapsed += interval
+
+        return AgentResponse.success({
+            "found":     False,
+            "elapsed_s": round(elapsed, 1),
+            "timeout":   timeout,
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
+    except Exception as e:
+        return AgentResponse.failure(f"Wait failed: {e}")

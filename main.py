@@ -23,8 +23,42 @@ for _, name, _ in pkgutil.iter_modules(commands.__path__):
 # ── Memory session (optional — requires GROQ_API_KEY) ────────────────────────
 _memory = None
 
+def _launch_listener():
+    """Launch the C# Listener as a background process if the exe exists."""
+    from pathlib import Path
+    import subprocess
+
+    candidates = [
+        # Published self-contained exe (recommended)
+        Path(__file__).parent / "listener" / "bin" / "Release"
+            / "net8.0-windows" / "win-x64" / "publish" / "AgentShellListener.exe",
+        # Debug build fallback
+        Path(__file__).parent / "listener" / "bin" / "Debug"
+            / "net8.0-windows" / "AgentShellListener.exe",
+    ]
+
+    for exe in candidates:
+        if exe.exists():
+            try:
+                subprocess.Popen(
+                    [str(exe)],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(f"[Listener] Launched: {exe.name}")
+                return True
+            except Exception as e:
+                print(f"[Listener] ⚠️ Could not launch listener: {e}")
+                return False
+
+    print("[Listener] Exe not found — skipping. Run 'dotnet publish' in listener/ to build it.")
+    return False
+
+
 def _init_memory():
     global _memory
+    _launch_listener()
     api_key = os.environ.get("GROQ_API_KEY") or _load_api_key()
     if api_key:
         try:

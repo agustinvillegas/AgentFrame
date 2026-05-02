@@ -129,6 +129,11 @@ def _describe(evt: dict) -> str | None:
     if t == "window_change":
         return f"switched to window: {evt.get('window', '')}"
 
+    if t == "clipboard_change":
+        count   = evt.get("char_count", 0)
+        preview = evt.get("window", "")  # window field tiene el preview
+        return f"clipboard changed: {count} chars — preview: {preview}"
+
     if t == "tab_change":
         return f"navigated to tab: {evt.get('window', '')}"
 

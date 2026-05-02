@@ -105,3 +105,61 @@ def set_context(key: str, value: str) -> AgentResponse:
         return AgentResponse.success({"updated": {key: value}})
     except Exception as e:
         return AgentResponse.failure(f"Context update failed: {e}")
+
+@registry.register(
+    group="listener",
+    name="status",
+    description="Check if the C# Listener process is running and the memory system is active.",
+    params=[]
+)
+def listener_status() -> AgentResponse:
+    try:
+        import time
+        from pathlib import Path
+        import json
+
+        heartbeat_path = Path(__file__).resolve().parent.parent / "data" / "listener_heartbeat.json"
+
+        if not heartbeat_path.exists():
+            return AgentResponse.success({
+                "running":  False,
+                "reason":   "Heartbeat file not found. Listener may not be started.",
+                "indexer":  _indexer_status(),
+            })
+
+        data    = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+        last_ts = data.get("ts", 0)
+        age_s   = int(time.time()) - last_ts
+
+        running = age_s <= 10  # más de 10s sin heartbeat = caído
+
+        return AgentResponse.success({
+            "running":        running,
+            "last_heartbeat": last_ts,
+            "age_seconds":    age_s,
+            "version":        data.get("version"),
+            "reason":         None if running else f"Last heartbeat was {age_s}s ago.",
+            "indexer":        _indexer_status(),
+        })
+
+    except Exception as e:
+        return AgentResponse.failure(f"Listener status check failed: {e}")
+
+
+def _indexer_status() -> dict:
+    """Estado del indexer — cuántos chunks procesados y si tiene API key."""
+    try:
+        from memory.store import store
+        count   = store.chunk_count()
+        ctx     = store.get_context()
+        has_key = bool(
+            __import__("os").environ.get("GROQ_API_KEY") or
+            ((__import__("pathlib").Path(__file__).parent.parent / "config" / "api_keys.json").exists())
+        )
+        return {
+            "active":         has_key,
+            "chunks_indexed": count,
+            "has_context":    bool(ctx),
+        }
+    except Exception:
+        return {"active": False, "chunks_indexed": 0, "has_context": False}

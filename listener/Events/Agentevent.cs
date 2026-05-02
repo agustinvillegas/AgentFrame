@@ -11,6 +11,7 @@ public enum EventType
     process_stop,
     keystroke_burst,
     click,
+    clipboard_change,
 }
 
 public sealed class AgentEvent
@@ -46,6 +47,12 @@ public sealed class AgentEvent
         Type   = nameof(EventType.window_change),
         Window = window,
     };
+    public static AgentEvent ClipboardChange(string preview, int length) => new()
+{
+    Type    = nameof(EventType.clipboard_change),
+    Window  = preview.Length > 120 ? preview[..120] + "..." : preview,
+    CharCount = length,
+};
 
     public static AgentEvent TabChange(string window) => new()
     {

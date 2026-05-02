@@ -27,7 +27,8 @@ class Program
         using var windowHook   = new WindowHook(Emit);
         using var keyboardHook = new KeyboardHook(Emit);
         using var mouseHook    = new MouseHook(Emit);
-
+        using var clipboardWatcher = new ClipboardWatcher(Emit);
+        
         Console.WriteLine("[Listener] Hooks active.");
 
         // ── Process watcher ───────────────────────────────────────────────────
@@ -39,10 +40,37 @@ class Program
 
         Console.WriteLine($"[Listener] Waiting for client on pipe '{PIPE_NAME}'...");
 
+        
+        var heartbeatPath = Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", 
+            "data", "listener_heartbeat.json");
+
+        _ = Task.Run(async () =>
+    {
         while (!cts.Token.IsCancellationRequested)
         {
             try
             {
+                var dir = Path.GetDirectoryName(heartbeatPath)!;
+                Directory.CreateDirectory(dir);
+                var payload = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ts      = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    status  = "running",
+                    version = "0.4",
+                });
+                await File.WriteAllTextAsync(heartbeatPath, payload, cts.Token);
+            }
+            catch { /* nunca romper el listener por un heartbeat fallido */ }
+
+            await Task.Delay(5000, cts.Token);
+        }
+    }, cts.Token);
+
+            while (!cts.Token.IsCancellationRequested)
+            {
+                try
+                {
                 await using var pipe = new NamedPipeServerStream(
                     PIPE_NAME,
                     PipeDirection.Out,

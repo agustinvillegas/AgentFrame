@@ -139,8 +139,16 @@ def elements(filter: str | None = None, enabled_only: bool = False) -> AgentResp
         seen = set()
         elements_out = []
         for el in raw_elements:
-            center = el.get("bounds", {}).get("center", [0, 0])
-            key = (el["type"], el["label"], center[0] // 5, center[1] // 5)
+            label = el.get("label", "").strip()
+            bounds = el.get("bounds", {})
+    
+            if label:
+                # Elementos con label: deduplicar por tipo + texto
+                key = (el["type"], label)
+            else:
+            # Elementos sin label: usar posición exacta
+                key = (el["type"], bounds.get("left"), bounds.get("top"))
+    
             if key not in seen:
                 seen.add(key)
                 elements_out.append(el)

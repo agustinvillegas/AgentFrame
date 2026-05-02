@@ -31,7 +31,7 @@ class Program
         Console.WriteLine("[Listener] Hooks active.");
 
         // ── Process watcher ───────────────────────────────────────────────────
-        var processWatcher = StartProcessWatcher(Emit);
+        var (startWatcher, stopWatcher) = StartProcessWatcher(Emit);
 
         // ── Named pipe server loop ────────────────────────────────────────────
         var cts = new CancellationTokenSource();
@@ -86,46 +86,45 @@ class Program
         }
 
         processWatcher?.Dispose();
+        startWatcher?.Dispose();
+        stopWatcher.Dispose();
         Console.WriteLine("[Listener] Stopped.");
     }
 
-    private static ManagementEventWatcher? StartProcessWatcher(Action<AgentEvent> emit)
+   // La función cambia su retorno:
+private static (ManagementEventWatcher?, ManagementEventWatcher?) StartProcessWatcher(Action<AgentEvent> emit)
+{
+    try
     {
-        try
+        var startQuery = new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace");
+        var startWatcher = new ManagementEventWatcher(startQuery);
+        startWatcher.EventArrived += (_, e) =>
         {
-            // Watch for process start
-            var startQuery = new WqlEventQuery(
-                "SELECT * FROM Win32_ProcessStartTrace");
-            var startWatcher = new ManagementEventWatcher(startQuery);
-            startWatcher.EventArrived += (_, e) =>
-            {
-                var name = e.NewEvent["ProcessName"]?.ToString() ?? "";
-                var pid  = Convert.ToInt32(e.NewEvent["ProcessID"]);
-                if (!string.IsNullOrEmpty(name))
-                    emit(AgentEvent.ProcessStart(name, pid));
-            };
-            startWatcher.Start();
+            var name = e.NewEvent["ProcessName"]?.ToString() ?? "";
+            var pid  = Convert.ToInt32(e.NewEvent["ProcessID"]);
+            if (!string.IsNullOrEmpty(name))
+                emit(AgentEvent.ProcessStart(name, pid));
+        };
+        startWatcher.Start();
 
-            // Watch for process stop
-            var stopQuery = new WqlEventQuery(
-                "SELECT * FROM Win32_ProcessStopTrace");
-            var stopWatcher = new ManagementEventWatcher(stopQuery);
-            stopWatcher.EventArrived += (_, e) =>
-            {
-                var name = e.NewEvent["ProcessName"]?.ToString() ?? "";
-                var pid  = Convert.ToInt32(e.NewEvent["ProcessID"]);
-                if (!string.IsNullOrEmpty(name))
-                    emit(AgentEvent.ProcessStop(name, pid));
-            };
-            stopWatcher.Start();
-
-            Console.WriteLine("[Listener] Process watcher active.");
-            return startWatcher;
-        }
-        catch (Exception ex)
+        var stopQuery = new WqlEventQuery("SELECT * FROM Win32_ProcessStopTrace");
+        var stopWatcher = new ManagementEventWatcher(stopQuery);
+        stopWatcher.EventArrived += (_, e) =>
         {
-            Console.WriteLine($"[Listener] Process watcher unavailable: {ex.Message}");
-            return null;
-        }
+            var name = e.NewEvent["ProcessName"]?.ToString() ?? "";
+            var pid  = Convert.ToInt32(e.NewEvent["ProcessID"]);
+            if (!string.IsNullOrEmpty(name))
+                emit(AgentEvent.ProcessStop(name, pid));
+        };
+        stopWatcher.Start();
+
+        Console.WriteLine("[Listener] Process watcher active.");
+        return (startWatcher, stopWatcher);
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Listener] Process watcher unavailable: {ex.Message}");
+        return (null, null);
+    }
+}
 }

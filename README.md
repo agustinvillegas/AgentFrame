@@ -12,6 +12,7 @@ Every command returns `{"ok": bool, "data": {...}, "error": str|null, "state_del
 ```
 help --json           → receive full schema (do this once per session)
 context get           → get current mandatory context (active window, last action, state, goal)
+listener status       → verify listener and indexer are active before trusting context
 screen active         → check active window title
 screen elements       → get UI elements via Accessibility Tree (preferred over capture)
   if complete=false   → description via OCR returned automatically (0.3+)
@@ -33,6 +34,7 @@ index query --last 5  → retrieve recent activity history if needed
 - `context get` — mandatory context, always current (5 fields: active_window, last_action, result, state, session_goal)
 - `index query` — pull-based history, call only when you need past context
 - `index logs` — query internal error log (WARNING/ERROR level)
+- `listener status` — check if C# listener and indexer are active
 - Context updates automatically after every command via state_delta
 - Indexer runs in background, does not block commands
 
@@ -40,7 +42,7 @@ index query --last 5  → retrieve recent activity history if needed
 
 Run `help --json` for full schema with parameter types and descriptions.
 
-Groups: screen | mouse | keyboard | audio | window | app | clipboard | index | context
+Groups: screen | mouse | keyboard | audio | window | app | clipboard | index | context | listener
 
 ## Running
 
@@ -89,8 +91,16 @@ agentshell audio volume --set 60
 - **New:** `screen region` — screenshot of arbitrary coordinates
 - **New:** Structured logging to SQLite via `core/logger.py`, queryable with `index logs`
 
-### v0.3 — Perception improvement *(current)*
+### v0.3 — Perception improvement
 - **New:** OCR as intermediate perception layer between Accessibility Tree and raw screenshot
 - When `screen elements` returns `complete: false`, a text description via OCR is automatically attached to the response — no extra command needed
 - Agent only requests raw screenshot when OCR description is insufficient
 - Eliminates vision model token cost in the vast majority of fallback cases
+
+### v0.4 — Observability and environment awareness *(current)*
+- **New:** `screen monitors` — enumerate all connected monitors with bounds and resolution
+- Multi-monitor support in `screen capture`, `screen region`, and OCR — active window captured correctly regardless of which monitor it's on
+- **New:** `listener status` — check if C# listener is running via heartbeat file, includes indexer state
+- C# listener writes heartbeat every 5s to `data/listener_heartbeat.json`
+- **New:** Clipboard watch in C# listener — emits `clipboard_change` events when user copies content
+- Clipboard changes flow through Aggregator → Indexer → context, agent sees them via `index query`

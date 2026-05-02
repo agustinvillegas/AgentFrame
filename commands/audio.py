@@ -1,6 +1,7 @@
 from __future__ import annotations
 from core.response import AgentResponse
 from core.registry import registry, CommandParam
+import pyaudio
 
 
 @registry.register(
@@ -84,38 +85,32 @@ def mute(state: bool | None = None) -> AgentResponse:
 )
 def devices(type: str = "output") -> AgentResponse:
     try:
-        from pycaw.pycaw import AudioUtilities, EDataFlow, ERole
-        from pycaw.api.mmdeviceapi import IMMDeviceEnumerator
-        from comtypes import CLSCTX_ALL
-        import comtypes.client
+        import pyaudio
 
-        enumerator = comtypes.client.CreateObject(
-            "{BCDE0395-E52F-467C-8E3D-C4579291692E}",
-            interface=IMMDeviceEnumerator
-        )
+        pa        = pyaudio.PyAudio()
+        count     = pa.get_device_count()
+        result    = []
+        host_type = "output" if type == "output" else "input"
 
-        flow = EDataFlow.eRender if type == "output" else EDataFlow.eCapture
-        collection = enumerator.EnumAudioEndpoints(flow, 1)  # 1 = DEVICE_STATE_ACTIVE
-        count = collection.GetCount()
-
-        result = []
         for i in range(count):
-            device = collection.Item(i)
-            dev_id = device.GetId()
-            props  = device.OpenPropertyStore(0)  # STGM_READ
-
             try:
-                name = props.GetValue(
-                    "{a45c254e-df1c-4efd-8020-67d146a850e0}", 14  # PKEY_Device_FriendlyName
-                ).GetValue()
-            except Exception:
-                name = f"Device {i}"
+                info = pa.get_device_info_by_index(i)
+                # Filtrar por tipo
+                if host_type == "output" and info.get("maxOutputChannels", 0) == 0:
+                    continue
+                if host_type == "input" and info.get("maxInputChannels", 0) == 0:
+                    continue
 
-            result.append({
-                "index": i,
-                "id":    dev_id,
-                "name":  name,
-            })
+                result.append({
+                    "index": i,
+                    "name":  info.get("name", f"Device {i}"),
+                    "channels": info.get("maxOutputChannels") if host_type == "output" else info.get("maxInputChannels"),
+                    "default_sr": int(info.get("defaultSampleRate", 0)),
+                })
+            except Exception:
+                continue
+
+        pa.terminate()
 
         return AgentResponse.success({
             "devices": result,
@@ -124,7 +119,7 @@ def devices(type: str = "output") -> AgentResponse:
         })
 
     except ImportError:
-        return AgentResponse.failure("pycaw not installed. Run: pip install pycaw comtypes")
+        return AgentResponse.failure("pyaudio not installed. Run: pip install pyaudio")
     except Exception as e:
         return AgentResponse.failure(f"Device enumeration failed: {e}")
 
@@ -141,44 +136,26 @@ def devices(type: str = "output") -> AgentResponse:
 )
 def device(name: str | None = None, index: int | None = None, type: str = "output") -> AgentResponse:
     try:
-        import subprocess
-        if name is None and index is None:
-            return AgentResponse.failure("Provide --name or --index.")
-
-        if name:
-            script = f"""
-            $device = Get-AudioDevice -List | Where-Object {{ $_.Type -eq '{type.capitalize()}' -and $_.Name -like '*{name}*' }} | Select-Object -First 1
-            if ($device) {{ Set-AudioDevice -Id $device.Id; Write-Output $device.Name }}
-            else {{ Write-Error 'Device not found' }}
-            """
-        else:
-            script = f"""
-            $device = (Get-AudioDevice -List | Where-Object {{ $_.Type -eq '{type.capitalize()}' }})[$index]
-            if ($device) {{ Set-AudioDevice -Id $device.Id; Write-Output $device.Name }}
-            else {{ Write-Error 'Device not found' }}
-            """
-
-        result = subprocess.run(
-            ["powershell", "-Command", script],
-            capture_output=True, text=True, timeout=10
+        from pycaw.pycaw import AudioUtilities
+        sessions = AudioUtilities.GetAllSessions()
+        # Obtener nombre via propiedades del dispositivo
+        name = device.GetId()
+        props = device.OpenPropertyStore(0)
+        val = props.GetValue(
+            "{a45c254e-df1c-4efd-8020-67d146a850e0}",
+            14
         )
-
-        if result.returncode != 0 or result.stderr:
-            return AgentResponse.failure(
-                f"Could not set device. Ensure 'AudioDeviceCmdlets' is installed: "
-                f"Install-Module -Name AudioDeviceCmdlets"
-            )
-
-        set_name = result.stdout.strip()
-        return AgentResponse.success(
-            {"set": set_name, "type": type},
-            state_delta={"last_action": f"changed {type} device to {set_name}", "result": f"{type} device changed"}
-        )
-
-    except subprocess.TimeoutExpired:
-        return AgentResponse.failure("PowerShell timeout.")
-    except Exception as e:
-        return AgentResponse.failure(f"Device switch failed: {e}")
+        name = str(val.GetValue())
+    except Exception:
+        # Fallback: intentar via pyaudio
+        try:
+            import pyaudio
+            pa = pyaudio.PyAudio()
+            info = pa.get_device_info_by_index(i)
+            name = info.get("name", f"Device {i}")
+            pa.terminate()
+        except Exception:
+            name = f"Device {i}"
     
     
 @registry.register(

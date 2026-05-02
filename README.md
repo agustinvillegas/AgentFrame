@@ -17,6 +17,8 @@ screen active         → check active window title
 screen elements       → get UI elements via Accessibility Tree (preferred over capture)
   if complete=false   → description via OCR returned automatically (0.3+)
   if description insufficient → screen capture --region active (last resort)
+screen find           → find a specific element by text instead of parsing all elements
+screen wait           → wait for an element to appear after triggering an action
 <execute action>      → mouse click / keyboard type / app launch / etc.
 context get           → verify state updated after action
 index query --last 5  → retrieve recent activity history if needed
@@ -25,9 +27,10 @@ index query --last 5  → retrieve recent activity history if needed
 ## Perception priority
 
 1. `screen elements` — structured UI tree, no vision model needed, fastest
-2. OCR description — auto-attached when tree is incomplete, text-based, no token cost
-3. `screen capture --region active` — active window only, use when OCR is insufficient
-4. `screen capture --region full` — full desktop, last resort
+2. `screen find` — when you know what you're looking for, skip full element list
+3. OCR description — auto-attached when tree is incomplete, text-based, no token cost
+4. `screen capture --region active` — active window only, use when OCR is insufficient
+5. `screen capture --region full` — full desktop, last resort
 
 ## Memory system
 
@@ -97,10 +100,16 @@ agentshell audio volume --set 60
 - Agent only requests raw screenshot when OCR description is insufficient
 - Eliminates vision model token cost in the vast majority of fallback cases
 
-### v0.4 — Observability and environment awareness *(current)*
+### v0.4 — Observability and environment awareness
 - **New:** `screen monitors` — enumerate all connected monitors with bounds and resolution
 - Multi-monitor support in `screen capture`, `screen region`, and OCR — active window captured correctly regardless of which monitor it's on
 - **New:** `listener status` — check if C# listener is running via heartbeat file, includes indexer state
 - C# listener writes heartbeat every 5s to `data/listener_heartbeat.json`
 - **New:** Clipboard watch in C# listener — emits `clipboard_change` events when user copies content
 - Clipboard changes flow through Aggregator → Indexer → context, agent sees them via `index query`
+
+### v0.5 — Command depth *(current)*
+- **audio:** `audio devices` — list input/output devices, `audio device` — switch default device, `audio app` — per-app volume and mute control
+- **screen:** `screen find` — locate element by text, returns position directly, `screen text` — extract all visible text in reading order, `screen wait` — wait for element to appear with timeout
+- **window:** `window resize`, `window move`, `window snap` (left/right/maximize/restore), `window info` — detailed window metadata including process and PID
+- **response:** removed null/empty fields from JSON output — cleaner signal for the agent

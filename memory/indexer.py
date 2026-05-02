@@ -5,6 +5,9 @@ import threading
 from queue import Queue, Empty
 from memory.aggregator import Chunk
 from memory.store import store
+from core.logger import get_logger
+
+logger = get_logger("indexer")
 
 INDEXER_MODEL = "llama-3.1-8b-instant"
 
@@ -125,7 +128,7 @@ class Indexer:
             except Empty:
                 continue
             except Exception as e:
-                print(f"[Indexer] ⚠️ Worker error: {e}")
+                logger.error(f"[indexer] ⚠ Worker error: {e}", exc_info=True)
 
     def _process(self, chunk: Chunk):
         try:
@@ -147,7 +150,7 @@ class Indexer:
                 store.set_context(safe_ctx)
 
         except Exception as e:
-            print(f"[Indexer] ⚠️ Processing failed, storing raw: {e}")
+            logger.warning(f"Processing failed, storing raw: {e}", exc_info=True)
             store.add_chunk(
                 window=chunk.window,
                 summary=f"{chunk.source}: {'; '.join(chunk.actions[:3])}",
@@ -196,14 +199,18 @@ Rules:
 
 
 def _call_llm(prompt: str, api_key: str) -> dict:
-    from groq import Groq
-    client   = Groq(api_key=api_key)
-    response = client.chat.completions.create(
-        model=INDEXER_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-        max_tokens=512,
-    )
-    raw = response.choices[0].message.content or ""
-    raw = re.sub(r"```(?:json)?|```", "", raw).strip()
-    return json.loads(raw)
+    try:
+        from groq import Groq
+        client   = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model=INDEXER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=512,
+        )
+        raw = response.choices[0].message.content or ""
+        raw = re.sub(r"```(?:json)?|```", "", raw).strip()
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"LLM returned invalid JSON: {e}", extra={"raw": raw})
+        raise

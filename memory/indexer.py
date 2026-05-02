@@ -29,6 +29,18 @@ _ACTION_TAGS: dict[str, list[str]] = {
     "context":  ["memory", "context"],
 }
 
+_REQUIRED_CTX_KEYS = {"active_window", "last_action", "result", "state", "session_goal"}
+
+def _validate_and_merge_context(new_ctx: dict) -> dict:
+    """Merge new_ctx into current context. Never writes partial replacements."""
+    current = store.get_context()
+    merged  = dict(current)
+    
+    for key in _REQUIRED_CTX_KEYS:
+        if key in new_ctx and new_ctx[key] is not None:
+            merged[key] = new_ctx[key]
+    
+    return merged
 
 def _is_simple_chunk(chunk: Chunk) -> bool:
     """
@@ -131,7 +143,8 @@ class Indexer:
                 )
 
             if new_ctx:
-                store.set_context(new_ctx)
+                safe_ctx = _validate_and_merge_context(new_ctx)
+                store.set_context(safe_ctx)
 
         except Exception as e:
             print(f"[Indexer] ⚠️ Processing failed, storing raw: {e}")

@@ -215,13 +215,22 @@ def active_window() -> AgentResponse:
 
 
 def _capture_active_window():
-    """Capture only the bounding box of the active window."""
+    """Captura la ventana activa independientemente del monitor en que esté."""
     import pyautogui
     try:
         import win32gui
         hwnd = win32gui.GetForegroundWindow()
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        return pyautogui.screenshot(region=(left, top, right - left, bottom - top))
+
+        # GetWindowRect devuelve coordenadas virtuales del escritorio
+        # que son correctas para capturas multi-monitor con pyautogui
+        width  = right - left
+        height = bottom - top
+
+        if width <= 0 or height <= 0:
+            return pyautogui.screenshot()
+
+        return pyautogui.screenshot(region=(left, top, width, height))
     except ImportError:
         return pyautogui.screenshot()
 
@@ -289,7 +298,12 @@ def _ocr_active_window() -> dict:
             import win32gui
             hwnd = win32gui.GetForegroundWindow()
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            img = pyautogui.screenshot(region=(left, top, right - left, bottom - top))
+            width  = right - left
+            height = bottom - top
+            if width > 0 and height > 0:
+                img = pyautogui.screenshot(region=(left, top, width, height))
+            else:
+                img = pyautogui.screenshot()
         except Exception:
             img = pyautogui.screenshot()
 
@@ -327,3 +341,49 @@ def _ocr_active_window() -> dict:
             "elements":    [],
             "count":       0,
         }
+    
+@registry.register(
+    group="screen",
+    name="monitors",
+    description="List all connected monitors with their bounds and resolution.",
+    params=[]
+)
+def monitors() -> AgentResponse:
+    try:
+        import win32api
+
+        monitors_raw = win32api.EnumDisplayMonitors()
+        result = []
+
+        for i, (hMonitor, hdcMonitor, rect) in enumerate(monitors_raw):
+            info = win32api.GetMonitorInfo(hMonitor)
+            work = info["Work"]
+            mon  = info["Monitor"]
+            result.append({
+                "index":   i,
+                "primary": info["Flags"] == 1,
+                "bounds":  {
+                    "left":   mon[0],
+                    "top":    mon[1],
+                    "right":  mon[2],
+                    "bottom": mon[3],
+                    "width":  mon[2] - mon[0],
+                    "height": mon[3] - mon[1],
+                },
+                "work_area": {
+                    "left":   work[0],
+                    "top":    work[1],
+                    "right":  work[2],
+                    "bottom": work[3],
+                },
+            })
+
+        return AgentResponse.success({
+            "monitors": result,
+            "count":    len(result),
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pywin32 not installed. Run: pip install pywin32")
+    except Exception as e:
+        return AgentResponse.failure(f"Monitor enumeration failed: {e}")

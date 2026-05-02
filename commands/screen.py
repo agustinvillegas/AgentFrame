@@ -3,7 +3,10 @@ import base64
 import io
 from core.response import AgentResponse
 from core.registry import registry, CommandParam
+import threading
 
+_ocr_reader = None
+_ocr_lock   = threading.Lock()
 
 @registry.register(
     group="screen",
@@ -168,6 +171,14 @@ def elements(filter: str | None = None, enabled_only: bool = False) -> AgentResp
         }
         if note:
             result["note"] = note
+            
+        if not complete:
+            ocr = _ocr_active_window()
+            result["ocr"] = ocr
+            result["note"] = (
+                "Accessibility Tree incomplete. OCR description attached. "
+                "Request 'screen capture' only if OCR is insufficient for your task."
+            )
 
         return AgentResponse.success(result)
 
@@ -252,3 +263,67 @@ def region(x: int, y: int, width: int, height: int) -> AgentResponse:
         })
     except Exception as e:
         return AgentResponse.failure(f"Region capture failed: {e}")
+    
+def _get_ocr_reader():
+    """Lazy init — easyocr descarga modelos la primera vez, no querés hacerlo en import."""
+    global _ocr_reader
+    if _ocr_reader is None:
+        with _ocr_lock:
+            if _ocr_reader is None:
+                import easyocr
+                _ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+    return _ocr_reader
+
+
+def _ocr_active_window() -> dict:
+    """
+    Captura la ventana activa y corre OCR sobre ella.
+    Devuelve texto estructurado con posición y confianza.
+    """
+    try:
+        import pyautogui
+        import numpy as np
+
+        # Captura la ventana activa como array numpy
+        try:
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            img = pyautogui.screenshot(region=(left, top, right - left, bottom - top))
+        except Exception:
+            img = pyautogui.screenshot()
+
+        img_np  = np.array(img)
+        reader  = _get_ocr_reader()
+        results = reader.readtext(img_np)
+
+        # Filtramos resultados con confianza baja
+        MIN_CONFIDENCE = 0.4
+        texts = []
+        for bbox, text, confidence in results:
+            if confidence < MIN_CONFIDENCE:
+                continue
+            # Centro del bounding box
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            texts.append({
+                "text":       text.strip(),
+                "confidence": round(confidence, 2),
+                "center":     [int(sum(xs) / 4), int(sum(ys) / 4)],
+            })
+
+        # Descripción textual legible para el agente
+        description = " | ".join(t["text"] for t in texts if t["text"])
+
+        return {
+            "description": description or "No readable text found.",
+            "elements":    texts,
+            "count":       len(texts),
+        }
+
+    except Exception as e:
+        return {
+            "description": f"OCR failed: {e}",
+            "elements":    [],
+            "count":       0,
+        }

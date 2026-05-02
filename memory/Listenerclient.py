@@ -37,25 +37,45 @@ class ListenerClient:
                 print(f"[Listener] Disconnected ({e}). Retrying in {RECONNECT_DELAY_S}s...")
                 time.sleep(RECONNECT_DELAY_S)
 
-    def _connect_and_read(self):
-        import win32pipe, win32file, pywintypes  # type: ignore
+def _connect_and_read(self):
+    import win32pipe, win32file, win32event, pywintypes  # type: ignore
 
-        handle = win32file.CreateFile(
-            PIPE_NAME,
-            win32file.GENERIC_READ,
-            0, None,
-            win32file.OPEN_EXISTING,
-            0, None
-        )
+    handle = win32file.CreateFile(
+        PIPE_NAME,
+        win32file.GENERIC_READ,
+        0, None,
+        win32file.OPEN_EXISTING,
+        win32file.FILE_FLAG_OVERLAPPED,  # necesario para lectura async
+        None
+    )
 
-        print("[Listener] Connected to C# listener.")
-        buffer = ""
+    print("[Listener] Connected to C# listener.")
+    buffer = ""
 
-        try:
-            while self._running:
+    overlapped = win32file.OVERLAPPED()
+    overlapped.hEvent = win32event.CreateEvent(None, True, False, None)
+
+    try:
+        while self._running:
+            data_buf = win32file.AllocateReadBuffer(4096)
+
+            try:
+                win32file.ReadFile(handle, data_buf, overlapped)
+            except pywintypes.error as e:
+                if e.winerror == 997:  # ERROR_IO_PENDING — normal en overlapped
+                    pass
+                else:
+                    break
+
+            # Espera con timeout de 1 segundo — permite chequear self._running
+            rc = win32event.WaitForSingleObject(overlapped.hEvent, 1000)
+
+            if rc == win32event.WAIT_OBJECT_0:
+                # Datos disponibles
                 try:
-                    _, data = win32file.ReadFile(handle, 4096)
-                    buffer += data.decode("utf-8", errors="replace")
+                    n_bytes = win32file.GetOverlappedResult(handle, overlapped, False)
+                    chunk = bytes(data_buf[:n_bytes]).decode("utf-8", errors="replace")
+                    buffer += chunk
 
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
@@ -63,11 +83,21 @@ class ListenerClient:
                         if line:
                             self._handle_event(line)
 
+                    win32event.ResetEvent(overlapped.hEvent)
                 except Exception:
                     break
-        finally:
-            win32file.CloseHandle(handle)
-            print("[Listener] Pipe handle closed.")
+
+            elif rc == win32event.WAIT_TIMEOUT:
+                # Timeout normal — volvemos a chequear self._running
+                continue
+            else:
+                # Error o pipe cerrado
+                break
+
+    finally:
+        win32event.CloseHandle(overlapped.hEvent)
+        win32file.CloseHandle(handle)
+        print("[Listener] Pipe handle closed.")
 
     def _handle_event(self, line: str):
         try:

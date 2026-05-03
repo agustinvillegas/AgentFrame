@@ -121,9 +121,14 @@ agentshell audio volume --set 60
 - **screen:** `screen waitgone` — wait for element to disappear, complements `screen wait`
 - **fix:** `pyautogui.FAILSAFE = False` — prevents cursor corner exception from killing the agent
 
-### v0.7 — App resolution *(current)*
+### v0.7 — App resolution 
 - **app:** `app launch` rewritten — now searches Program Files, Program Files (x86), Windows registry, and system PATH before falling back to Start Menu
 - Depth-limited directory search (4 levels) via `os.walk` — faster than `rglob`
 - `_APP_ALIASES` now used as search accelerator, not hard requirement — unlisted apps resolve automatically
 - Start Menu fallback (Win → type → Enter) as last resort with `note` in response
 - **app:** `_launch_via_start_menu` now verifies the process actually started by comparing process list before and after — returns `ok: false` instead of false positive if launch failed
+
+### v0.8 — System awareness and notifications *(current)*
+- **New group `system`:** `system info`, `system cpu`, `system ram`, `system disk`, `system battery` — full hardware and OS state queryable by the agent
+- **New group `network`:** `network status`, `network ip`, `network connections` — connectivity state and active connections, filterable by process
+- **New group `notify`:** `notify send` — Windows toast notifications with configurable duration

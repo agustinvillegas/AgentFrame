@@ -19,6 +19,7 @@ dependencies    = [
     "groq>=0.9.0",
     "easyocr>1.7.0",
     "pyaudio>=0.2.14",
+    "windows-toasts>=1.2.0",
 ]
 
 [project.scripts]

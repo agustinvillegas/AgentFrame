@@ -20,6 +20,7 @@ dependencies    = [
     "easyocr>1.7.0",
     "pyaudio>=0.2.14",
     "windows-toasts>=1.2.0",
+    "pyreadline3>=3.4.1",
 ]
 
 [project.scripts]

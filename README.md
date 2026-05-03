@@ -132,3 +132,8 @@ agentshell audio volume --set 60
 - **New group `system`:** `system info`, `system cpu`, `system ram`, `system disk`, `system battery` — full hardware and OS state queryable by the agent
 - **New group `network`:** `network status`, `network ip`, `network connections` — connectivity state and active connections, filterable by process
 - **New group `notify`:** `notify send` — Windows toast notifications with configurable duration
+
+### v0.9 — REPL improvements
+- **New:** Command history — up/down arrows navigate previous commands, persists across sessions in `data/.shell_history`
+- **New:** Tab autocompletion — completes groups and commands, double Tab shows all options
+- **New:** Verbose mode — `--verbose on/off` shows command timing and state delta after each response

@@ -13,9 +13,53 @@ from core.response import AgentResponse
 from core.registry import registry
 import pyautogui
 
+try:
+    import readline
+except ImportError:
+    try:
+        import pyreadline3 as readline
+    except ImportError:
+        readline = None
+
+if readline:
+    import atexit
+    from pathlib import Path
+    _HISTORY_FILE = Path(__file__).parent / "data" / ".shell_history"
+    _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        readline.read_history_file(str(_HISTORY_FILE))
+    except FileNotFoundError:
+        pass
+    readline.set_history_length(500)
+    atexit.register(readline.write_history_file, str(_HISTORY_FILE))
+
+if readline:
+    def _completer(text: str, state: int):
+        try:
+            parts  = readline.get_line_buffer().split()
+            n_parts = len(parts)
+
+            if n_parts == 0 or (n_parts == 1 and not readline.get_line_buffer().endswith(" ")):
+                # Completar grupo
+                options = [g + " " for g in registry.groups() if g.startswith(text)]
+            elif n_parts == 1 or (n_parts == 2 and not readline.get_line_buffer().endswith(" ")):
+                # Completar comando dentro del grupo
+                group   = parts[0]
+                options = [c + " " for c in registry.commands(group) if c.startswith(text)]
+            else:
+                options = []
+
+            return options[state] if state < len(options) else None
+        except Exception:
+            return None
+
+    readline.set_completer(_completer)
+    readline.parse_and_bind("tab: complete")
+
 VERSION = "0.5.0"
 PROMPT  = ">>> "
 pyautogui.FAILSAFE = False
+_VERBOSE = False
 
 # ── Auto-discover and register all command modules ────────────────────────────
 for _, name, _ in pkgutil.iter_modules(commands.__path__):
@@ -110,6 +154,7 @@ def _parse_args(tokens: list[str]) -> tuple[dict, list[str]]:
     return kwargs, positional
 
 
+
 def _handle_help(kwargs: dict) -> str:
     schema = registry.schema()
     if kwargs.get("json"):
@@ -148,9 +193,21 @@ def _dispatch(line: str) -> str:
     if not tokens:
         return ""
 
+    if tokens[0] == "--verbose":
+        global _VERBOSE
+        if len(tokens) > 1 and tokens[1].lower() == "off":
+            _VERBOSE = False
+            return json.dumps({"ok": True, "data": {"verbose": False}})
+        else:
+            _VERBOSE = True
+            return json.dumps({"ok": True, "data": {"verbose": True}})
+
     if tokens[0] == "help":
         kwargs, _ = _parse_args(tokens[1:])
         return _handle_help(kwargs)
+
+    import time
+    _dispatch_start = time.time()
 
     if tokens[0] in ("exit", "quit"):
         if _memory:
@@ -214,13 +271,16 @@ def _dispatch(line: str) -> str:
         except Exception:
             pass
 
-    # Record to memory
-    if _memory and result.ok:
-        try:
-            window = _get_active_window()
-            _memory.record(window=window, action=f"{group} {cmd_name}", source="agent")
-        except Exception:
-            pass
+    if _VERBOSE:
+        import time
+        elapsed_ms = int((time.time() - _dispatch_start) * 1000)
+        verbose_info = {
+            "command":     f"{group} {cmd_name}",
+            "elapsed_ms":  elapsed_ms,
+            "state_delta": result.state_delta or None,
+            "ok":          result.ok,
+        }
+        print(f"[Verbose] {json.dumps(verbose_info)}", flush=True)
 
     return result.dump()
 

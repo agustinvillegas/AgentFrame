@@ -46,6 +46,13 @@ class MemoryStore:
 
                 CREATE INDEX IF NOT EXISTS idx_chunks_timestamp ON chunks(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_chunks_source    ON chunks(source);
+                               
+                CREATE TABLE IF NOT EXISTS user_data (
+                category TEXT NOT NULL,
+                key      TEXT NOT NULL,
+                value    TEXT NOT NULL,
+                PRIMARY KEY (category, key)
+                );                    
             """)
 
     # ── Index ─────────────────────────────────────────────────────────────────
@@ -141,3 +148,59 @@ class MemoryStore:
 
 # Global store instance
 store = MemoryStore()
+
+
+def set_user_data(self, category: str, key: str, value: str):
+    with self._lock, self._conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_data (category, key, value) VALUES (?,?,?)",
+            (category, key, value)
+        )
+
+def get_user_data(self, category: str, key: str) -> str | None:
+    with self._lock, self._conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM user_data WHERE category=? AND key=?",
+            (category, key)
+        ).fetchone()
+    return row["value"] if row else None
+
+def get_user_category(self, category: str) -> dict:
+    with self._lock, self._conn() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM user_data WHERE category=?",
+            (category,)
+        ).fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+def get_all_user_data(self, category: str | None = None) -> dict:
+    with self._lock, self._conn() as conn:
+        if category:
+            rows = conn.execute(
+                "SELECT category, key, value FROM user_data WHERE category=?",
+                (category,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT category, key, value FROM user_data"
+            ).fetchall()
+
+    result: dict = {}
+    for r in rows:
+        if r["category"] not in result:
+            result[r["category"]] = {}
+        result[r["category"]][r["key"]] = r["value"]
+    return result
+
+def delete_user_data(self, category: str, key: str | None = None):
+    with self._lock, self._conn() as conn:
+        if key:
+            conn.execute(
+                "DELETE FROM user_data WHERE category=? AND key=?",
+                (category, key)
+            )
+        else:
+            conn.execute(
+                "DELETE FROM user_data WHERE category=?",
+                (category,)
+            )

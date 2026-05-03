@@ -17,3 +17,4 @@ class MemorySession:
 
     def flush(self):
         self._aggregator.flush()
+

@@ -29,3 +29,7 @@ agentshell = "main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["commands*", "core*", "memory*"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["commands*", "core*", "memory*", "agentshell*"]

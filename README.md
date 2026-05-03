@@ -128,12 +128,17 @@ agentshell audio volume --set 60
 - Start Menu fallback (Win → type → Enter) as last resort with `note` in response
 - **app:** `_launch_via_start_menu` now verifies the process actually started by comparing process list before and after — returns `ok: false` instead of false positive if launch failed
 
-### v0.8 — System awareness and notifications *(current)*
+### v0.8 — System awareness and notifications 
 - **New group `system`:** `system info`, `system cpu`, `system ram`, `system disk`, `system battery` — full hardware and OS state queryable by the agent
 - **New group `network`:** `network status`, `network ip`, `network connections` — connectivity state and active connections, filterable by process
 - **New group `notify`:** `notify send` — Windows toast notifications with configurable duration
 
-### v0.9 — REPL improvements
+### v0.9 — REPL improvements 
 - **New:** Command history — up/down arrows navigate previous commands, persists across sessions in `data/.shell_history`
 - **New:** Tab autocompletion — completes groups and commands, double Tab shows all options
 - **New:** Verbose mode — `--verbose on/off` shows command timing and state delta after each response
+
+### v1.0 — Agent integration *(current)*
+- **New:** `AgentShellClient` — Python SDK to connect any LLM to the framework without managing subprocess or JSON parsing manually
+- **New:** `examples/` — reference integration scripts for Groq, OpenAI, and Anthropic showing the recommended agent loop pattern
+- Agent sends commands wrapped in ```shell blocks, shell returns JSON, agent continues — no framework-specific training needed

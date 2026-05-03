@@ -298,3 +298,4 @@ def info(title: str | None = None) -> AgentResponse:
         return AgentResponse.failure("pywin32 not installed. Run: pip install pywin32")
     except Exception as e:
         return AgentResponse.failure(f"Info failed: {e}")
+    

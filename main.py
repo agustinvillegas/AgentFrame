@@ -56,7 +56,7 @@ if readline:
     readline.set_completer(_completer)
     readline.parse_and_bind("tab: complete")
 
-VERSION = "0.5.0"
+VERSION = "1.1.0"
 PROMPT  = ">>> "
 pyautogui.FAILSAFE = False
 _VERBOSE = False
@@ -75,13 +75,11 @@ def _launch_listener():
     import subprocess
 
     candidates = [
-        # Published self-contained exe (recommended)
-        Path(__file__).parent / "listener" / "bin" / "Release"
-            / "net8.0-windows" / "win-x64" / "publish" / "AgentShellListener.exe",
-        # Debug build fallback
-        Path(__file__).parent / "listener" / "bin" / "Debug"
-            / "net8.0-windows" / "AgentShellListener.exe",
-    ]
+    Path(__file__).parent / "listener" / "bin" / "Release"
+        / "net8.0-windows" / "win-x64" / "publish" / "AgentShellListener.exe",
+    Path(__file__).parent / "listener" / "bin" / "Debug"
+        / "net8.0-windows" / "AgentShellListener.exe",
+]
 
     for exe in candidates:
         if exe.exists():

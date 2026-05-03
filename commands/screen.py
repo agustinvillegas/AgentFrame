@@ -5,6 +5,9 @@ from core.response import AgentResponse
 from core.registry import registry, CommandParam
 import threading
 
+from pywinauto import Desktop
+import win32gui, win32con
+
 _ocr_reader = None
 _ocr_lock   = threading.Lock()
 
@@ -54,23 +57,16 @@ def capture(region: str = "active") -> AgentResponse:
         "and you may want to call screen capture as well."
     ),
     params=[
-        CommandParam("filter", "string", False, None, "Filter by type: 'button' | 'edit' | 'text' | 'link' | 'checkbox' | 'list' | 'menu'. Omit for all."),
-        CommandParam("enabled_only", "bool", False, False, "If true, return only interactable (enabled) elements."),
+        CommandParam("filter",       "string", False, None,  "Filter by type: 'button' | 'edit' | 'text' | 'link' | 'checkbox' | 'list' | 'menu'. Omit for all."),
+        CommandParam("enabled_only", "bool",   False, False, "If true, return only interactable (enabled) elements."),
+        CommandParam("window",       "string", False, None,  "Partial window title to inspect. Omit for active window."),
     ]
 )
-def elements(filter: str | None = None, enabled_only: bool = False) -> AgentResponse:
+def elements(filter: str | None = None, enabled_only: bool = False, window: str | None = None) -> AgentResponse:
     try:
-        from pywinauto import Desktop
-
-        desktop = Desktop(backend="uia")
-
-        try:
-            active = desktop.active()
-        except Exception:
-            return AgentResponse.failure("Could not access active window.")
-
-        if not active:
-            return AgentResponse.failure("No active window found.")
+        active, err = _resolve_window(window)
+        if err:
+            return AgentResponse.failure(err)
 
         window_title = ""
         try:
@@ -91,6 +87,7 @@ def elements(filter: str | None = None, enabled_only: bool = False) -> AgentResp
                 "complete": False,
                 "note":     f"Accessibility Tree unavailable for this window: {e}",
             })
+       
 
         for ctrl in descendants:
             try:
@@ -400,15 +397,14 @@ def monitors() -> AgentResponse:
         CommandParam("text",         "string", True,  None,  "Text to search for (case-insensitive partial match)"),
         CommandParam("type",         "string", False, None,  "Filter by element type: 'button' | 'edit' | 'link' | etc."),
         CommandParam("enabled_only", "bool",   False, True,  "Only return enabled/interactable elements"),
+        CommandParam("window",       "string", False, None,  "Partial window title to inspect. Omit for active window."),
     ]
 )
-def find(text: str, type: str | None = None, enabled_only: bool = True) -> AgentResponse:
+def find(text: str, type: str | None = None, enabled_only: bool = True, window: str | None = None) -> AgentResponse:
     try:
-        from pywinauto import Desktop
-
-        active = Desktop(backend="uia").active()
-        if not active:
-            return AgentResponse.failure("No active window.")
+        active, err = _resolve_window(window)
+        if err:
+            return AgentResponse.failure(err)
 
         text_lower = text.lower()
         matches    = []
@@ -542,28 +538,27 @@ def text(min_length: int = 2) -> AgentResponse:
         "Use after triggering an action that causes a page load, dialog, or state change."
     ),
     params=[
-        CommandParam("text",    "string", True,  None, "Text to wait for (case-insensitive partial match)"),
-        CommandParam("timeout", "int",    False, 10,   "Max seconds to wait before giving up"),
-        CommandParam("interval","float",  False, 0.5,  "How often to check, in seconds"),
+        CommandParam("text",     "string", True,  None, "Text to wait for (case-insensitive partial match)"),
+        CommandParam("timeout",  "int",    False, 10,   "Max seconds to wait before giving up"),
+        CommandParam("interval", "float",  False, 0.5,  "How often to check, in seconds"),
+        CommandParam("window",   "string", False, None, "Partial window title to inspect. Omit for active window."),
     ]
 )
-def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
+def wait(text: str, timeout: int = 10, interval: float = 0.5, window: str | None = None) -> AgentResponse:
     try:
         import time
-        from pywinauto import Desktop
-
         text_lower = text.lower()
         elapsed    = 0.0
 
         while elapsed < timeout:
-            try:
-                active = Desktop(backend="uia").active()
-                if active:
+            active, _ = _resolve_window(window)
+            if active:
+                try:
                     for ctrl in active.descendants():
                         try:
                             label = (ctrl.element_info.name or "").strip()
                             if text_lower in label.lower():
-                                rect = ctrl.element_info.rectangle
+                                rect   = ctrl.element_info.rectangle
                                 center = None
                                 if rect:
                                     center = [
@@ -571,15 +566,15 @@ def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
                                         (rect.top  + rect.bottom) // 2,
                                     ]
                                 return AgentResponse.success({
-                                    "found":      True,
-                                    "text":       label,
-                                    "elapsed_s":  round(elapsed, 1),
-                                    "center":     center,
+                                    "found":     True,
+                                    "text":      label,
+                                    "elapsed_s": round(elapsed, 1),
+                                    "center":    center,
                                 })
                         except Exception:
                             continue
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             time.sleep(interval)
             elapsed += interval
@@ -589,12 +584,10 @@ def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
             "elapsed_s": round(elapsed, 1),
             "timeout":   timeout,
         })
-
-    except ImportError:
-        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
     except Exception as e:
         return AgentResponse.failure(f"Wait failed: {e}")
-    
+
+
 @registry.register(
     group="screen",
     name="waitgone",
@@ -606,21 +599,20 @@ def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
         CommandParam("text",     "string", True,  None, "Text to wait for disappearance (case-insensitive partial match)"),
         CommandParam("timeout",  "int",    False, 10,   "Max seconds to wait before giving up"),
         CommandParam("interval", "float",  False, 0.5,  "How often to check, in seconds"),
+        CommandParam("window",   "string", False, None, "Partial window title to inspect. Omit for active window."),
     ]
 )
-def waitgone(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
+def waitgone(text: str, timeout: int = 10, interval: float = 0.5, window: str | None = None) -> AgentResponse:
     try:
         import time
-        from pywinauto import Desktop
-
         text_lower = text.lower()
         elapsed    = 0.0
 
         while elapsed < timeout:
+            active, _ = _resolve_window(window)
             found = False
-            try:
-                active = Desktop(backend="uia").active()
-                if active:
+            if active:
+                try:
                     for ctrl in active.descendants():
                         try:
                             label = (ctrl.element_info.name or "").strip()
@@ -629,8 +621,8 @@ def waitgone(text: str, timeout: int = 10, interval: float = 0.5) -> AgentRespon
                                 break
                         except Exception:
                             continue
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             if not found:
                 return AgentResponse.success({
@@ -646,8 +638,46 @@ def waitgone(text: str, timeout: int = 10, interval: float = 0.5) -> AgentRespon
             "elapsed_s": round(elapsed, 1),
             "timeout":   timeout,
         })
-
-    except ImportError:
-        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
     except Exception as e:
         return AgentResponse.failure(f"Wait gone failed: {e}")
+    
+
+def _resolve_window(window: str | None):
+    import win32gui, win32con
+    import time
+    from pywinauto import Application
+
+    if window:
+        hwnd = None
+        def _cb(h, _):
+            nonlocal hwnd
+            if win32gui.IsWindowVisible(h):
+                title = win32gui.GetWindowText(h)
+                if window.lower() in title.lower():
+                    hwnd = h
+        win32gui.EnumWindows(_cb, None)
+
+        if not hwnd:
+            return None, f"No window matching '{window}' found."
+
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+        time.sleep(0.3)
+
+        try:
+            app    = Application(backend="uia").connect(handle=hwnd)
+            active = app.window(handle=hwnd)
+            return active, None
+        except Exception as e:
+            return None, f"Could not connect to window: {e}"
+    else:
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return None, "No active window found."
+        try:
+            app    = Application(backend="uia").connect(handle=hwnd)
+            active = app.window(handle=hwnd)
+            return active, None
+        except Exception as e:
+            return None, f"Could not access active window: {e}"

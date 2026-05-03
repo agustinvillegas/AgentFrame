@@ -90,6 +90,9 @@ def launch(name: str) -> AgentResponse:
             f"Could not launch '{target}'. App not found and Start Menu launch failed."
         )
 
+    except Exception as e:
+        return AgentResponse.failure(f"Launch failed: {e}")
+
 
 @registry.register(
     group="app",

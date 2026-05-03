@@ -113,7 +113,6 @@ class Program
             }
         }
 
-        processWatcher?.Dispose();
         startWatcher?.Dispose();
         stopWatcher.Dispose();
         Console.WriteLine("[Listener] Stopped.");

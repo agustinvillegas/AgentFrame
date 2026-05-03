@@ -3,3 +3,5 @@ __pycache__/
 data/
 .venv/
 config/api_keys.json
+listener/bin/
+listener/obj/

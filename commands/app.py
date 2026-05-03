@@ -3,6 +3,9 @@ import subprocess
 import webbrowser
 from core.response import AgentResponse
 from core.registry import registry, CommandParam
+import os
+import winreg
+from pathlib import Path
 
 
 _APP_ALIASES: dict[str, str] = {
@@ -29,6 +32,7 @@ _APP_ALIASES: dict[str, str] = {
     "google":        "https://www.google.com",
     "maps":          "https://maps.google.com",
     "spotify":       "https://open.spotify.com",
+    "brave": "brave.exe",
 }
 
 
@@ -37,13 +41,14 @@ _APP_ALIASES: dict[str, str] = {
     name="launch",
     description="Launch an application or open a URL. Accepts app names, executable names, or URLs.",
     params=[
-        CommandParam("name", "string", True, None, "App name, executable, or URL. Examples: 'chrome', 'notepad', 'youtube', 'https://example.com'"),
+        CommandParam("name", "string", True, None, "App name, executable, or URL. Examples: 'chrome', 'brave', 'notepad', 'https://example.com'"),
     ]
 )
 def launch(name: str) -> AgentResponse:
     try:
-        target = _APP_ALIASES.get(name.lower().strip(), name)
+        target = name.strip()
 
+        # URLs
         if target.startswith("http://") or target.startswith("https://"):
             webbrowser.open(target)
             return AgentResponse.success(
@@ -51,20 +56,36 @@ def launch(name: str) -> AgentResponse:
                 state_delta={"last_launched": target}
             )
 
-        subprocess.Popen(
-            [target],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        # Alias directo a URL
+        alias = _APP_ALIASES.get(target.lower())
+        if alias and (alias.startswith("http://") or alias.startswith("https://")):
+            webbrowser.open(alias)
+            return AgentResponse.success(
+                {"launched": alias, "type": "url"},
+                state_delta={"last_launched": alias}
+            )
+
+        # Buscar ejecutable
+        resolved = _resolve_executable(target)
+
+        if resolved:
+            subprocess.Popen(
+                [resolved],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return AgentResponse.success(
+                {"launched": resolved, "type": "app"},
+                state_delta={"last_launched": resolved}
+            )
+
+        # Último recurso — start menu
+        _launch_via_start_menu(target)
         return AgentResponse.success(
-            {"launched": target, "type": "app"},
+            {"launched": target, "type": "start_menu", "note": "Launched via Start Menu — verify app opened."},
             state_delta={"last_launched": target}
         )
 
-    except FileNotFoundError:
-        return AgentResponse.failure(
-            f"'{name}' not found. Check the name or provide full path."
-        )
     except Exception as e:
         return AgentResponse.failure(f"Launch failed: {e}")
 
@@ -215,3 +236,87 @@ def focus(name: str) -> AgentResponse:
         return AgentResponse.failure("pywin32 or psutil not installed.")
     except Exception as e:
         return AgentResponse.failure(f"Focus failed: {e}")
+    
+
+def _resolve_executable(name: str) -> str | None:
+    alias = _APP_ALIASES.get(name.lower().strip())
+    if alias:
+        if alias.startswith("http://") or alias.startswith("https://"):
+            return alias
+        name = alias
+
+    # 2. Si ya es una ruta válida
+    p = Path(name)
+    if p.exists():
+        return str(p)
+
+    search_name = name if name.endswith(".exe") else name + ".exe"
+
+    # 3. Program Files con límite de profundidad
+    def _search_dir(base: str, filename: str, max_depth: int = 4) -> str | None:
+        base_path = Path(base)
+        if not base_path.exists():
+            return None
+        for dirpath, dirs, files in os.walk(base_path):
+            depth = len(Path(dirpath).relative_to(base_path).parts)
+            if depth >= max_depth:
+                dirs.clear()
+                continue
+            for f in files:
+                if f.lower() == filename.lower():
+                    return str(Path(dirpath) / f)
+        return None
+
+    search_dirs = [
+        os.environ.get("ProgramFiles",      r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        os.environ.get("LOCALAPPDATA",      ""),
+        os.environ.get("APPDATA",           ""),
+    ]
+    for base in search_dirs:
+        if not base:
+            continue
+        result = _search_dir(base, search_name)
+        if result:
+            return result
+
+    # 4. Registro de Windows
+    key_path = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{search_name}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+            value, _ = winreg.QueryValueEx(key, "")
+            if value and Path(value).exists():
+                return value
+    except Exception:
+        pass
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            value, _ = winreg.QueryValueEx(key, "")
+            if value and Path(value).exists():
+                return value
+    except Exception:
+        pass
+
+    # 5. PATH del sistema
+    import shutil
+    found = shutil.which(search_name) or shutil.which(name)
+    if found:
+        return found
+
+    return None
+
+
+def _launch_via_start_menu(name: str) -> bool:
+    """Último recurso — Win, escribir, Enter."""
+    try:
+        import pyautogui
+        import time
+        pyautogui.press("win")
+        time.sleep(0.8)
+        pyautogui.write(name, interval=0.05)
+        time.sleep(1.0)
+        pyautogui.press("enter")
+        return True
+    except Exception:
+        return False

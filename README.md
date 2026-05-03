@@ -138,7 +138,14 @@ agentshell audio volume --set 60
 - **New:** Tab autocompletion — completes groups and commands, double Tab shows all options
 - **New:** Verbose mode — `--verbose on/off` shows command timing and state delta after each response
 
-### v1.0 — Agent integration *(current)*
+### v1.0 — Agent integration 
 - **New:** `AgentShellClient` — Python SDK to connect any LLM to the framework without managing subprocess or JSON parsing manually
 - **New:** `examples/` — reference integration scripts for Groq, OpenAI, and Anthropic showing the recommended agent loop pattern
 - Agent sends commands wrapped in ```shell blocks, shell returns JSON, agent continues — no framework-specific training needed
+
+### v1.1 — User memory *(current)*
+- **New group `user`:** persistent key-value memory about the user, organized in fixed categories
+- Categories: `preferences`, `environment`, `schedule`, `identity`, `projects`, `misc`
+- Commands: `user set`, `user get`, `user list`, `user delete`
+- Stored in SQLite alongside session memory — persists across sessions
+- Agent writes to memory as it learns about the user, reads it to personalize behavior

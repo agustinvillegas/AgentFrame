@@ -80,14 +80,15 @@ def launch(name: str) -> AgentResponse:
             )
 
         # Último recurso — start menu
-        _launch_via_start_menu(target)
-        return AgentResponse.success(
-            {"launched": target, "type": "start_menu", "note": "Launched via Start Menu — verify app opened."},
-            state_delta={"last_launched": target}
+        opened = _launch_via_start_menu(target)
+        if opened:
+            return AgentResponse.success(
+                {"launched": target, "type": "start_menu"},
+                state_delta={"last_launched": target}
+            )
+        return AgentResponse.failure(
+            f"Could not launch '{target}'. App not found and Start Menu launch failed."
         )
-
-    except Exception as e:
-        return AgentResponse.failure(f"Launch failed: {e}")
 
 
 @registry.register(
@@ -308,15 +309,29 @@ def _resolve_executable(name: str) -> str | None:
 
 
 def _launch_via_start_menu(name: str) -> bool:
-    """Último recurso — Win, escribir, Enter."""
+    """Último recurso — Win, escribir, Enter. Verifica que el proceso haya abierto."""
     try:
         import pyautogui
         import time
+        import psutil
+
+        procs_before = {p.info["name"].lower() for p in psutil.process_iter(["name"])}
+
         pyautogui.press("win")
         time.sleep(0.8)
         pyautogui.write(name, interval=0.05)
         time.sleep(1.0)
         pyautogui.press("enter")
-        return True
+        time.sleep(2.0)  # esperar que arranque
+
+        procs_after = {p.info["name"].lower() for p in psutil.process_iter(["name"])}
+        new_procs   = procs_after - procs_before
+
+        # Buscar si algún proceso nuevo coincide con el nombre buscado
+        name_lower = name.lower().replace(".exe", "")
+        matched    = next((p for p in new_procs if name_lower in p), None)
+
+        return matched is not None
+
     except Exception:
         return False

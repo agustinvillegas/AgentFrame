@@ -108,7 +108,7 @@ agentshell audio volume --set 60
 - **New:** Clipboard watch in C# listener — emits `clipboard_change` events when user copies content
 - Clipboard changes flow through Aggregator → Indexer → context, agent sees them via `index query`
 
-### v0.5 — Command depth *(current)*
+### v0.5 — Command depth
 - **audio:** `audio devices` — list input/output devices, `audio device` — switch default device, `audio app` — per-app volume and mute control
 - **screen:** `screen find` — locate element by text, returns position directly, `screen text` — extract all visible text in reading order, `screen wait` — wait for element to appear with timeout
 - **window:** `window resize`, `window move`, `window snap` (left/right/maximize/restore), `window info` — detailed window metadata including process and PID
@@ -120,3 +120,10 @@ agentshell audio volume --set 60
 - **app:** `app focus` — bring app to foreground by process name
 - **screen:** `screen waitgone` — wait for element to disappear, complements `screen wait`
 - **fix:** `pyautogui.FAILSAFE = False` — prevents cursor corner exception from killing the agent
+
+### v0.7 — App resolution *(current)*
+- **app:** `app launch` rewritten — now searches Program Files, Program Files (x86), Windows registry, and system PATH before falling back to Start Menu
+- Depth-limited directory search (4 levels) via `os.walk` — faster than `rglob`
+- `_APP_ALIASES` now used as search accelerator, not hard requirement — unlisted apps resolve automatically
+- Start Menu fallback (Win → type → Enter) as last resort with `note` in response
+- **app:** `_launch_via_start_menu` now verifies the process actually started by comparing process list before and after — returns `ok: false` instead of false positive if launch failed

@@ -302,3 +302,53 @@ def copy(src: str, dst: str) -> AgentResponse:
         return AgentResponse.failure(f"Permission denied")
     except Exception as e:
         return AgentResponse.failure(f"Copy failed: {e}")
+
+@registry.register(
+    group="files",
+    name="exists",
+    description="Check if a file or directory exists at the given path.",
+    params=[
+        CommandParam("path", "string", True, None, "Absolute or relative path to check"),
+    ]
+)
+def exists(path: str) -> AgentResponse:
+    try:
+        p = Path(path).expanduser().resolve()
+        ex = p.exists()
+        return AgentResponse.success({
+            "exists": ex,
+            "path":   str(p),
+            "type":   "dir" if p.is_dir() else "file" if p.is_file() else None,
+        })
+    except Exception as e:
+        return AgentResponse.failure(f"Exists check failed: {e}")
+
+
+@registry.register(
+    group="files",
+    name="info",
+    description="Get metadata of a specific file or directory.",
+    params=[
+        CommandParam("path", "string", True, None, "Absolute or relative file path"),
+    ]
+)
+def info(path: str) -> AgentResponse:
+    try:
+        p = Path(path).expanduser().resolve()
+        if not p.exists():
+            return AgentResponse.failure(f"Path not found: {path}")
+
+        stat = p.stat()
+        return AgentResponse.success({
+            "path":      str(p),
+            "name":      p.name,
+            "type":      "dir" if p.is_dir() else "file",
+            "size_bytes": stat.st_size if p.is_file() else None,
+            "modified":  stat.st_mtime,
+            "created":   stat.st_ctime,
+            "extension": p.suffix if p.is_file() else None,
+        })
+    except PermissionError:
+        return AgentResponse.failure(f"Permission denied: {path}")
+    except Exception as e:
+        return AgentResponse.failure(f"Info failed: {e}")

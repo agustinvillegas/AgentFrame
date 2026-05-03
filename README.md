@@ -113,3 +113,10 @@ agentshell audio volume --set 60
 - **screen:** `screen find` — locate element by text, returns position directly, `screen text` — extract all visible text in reading order, `screen wait` — wait for element to appear with timeout
 - **window:** `window resize`, `window move`, `window snap` (left/right/maximize/restore), `window info` — detailed window metadata including process and PID
 - **response:** removed null/empty fields from JSON output — cleaner signal for the agent
+
+### v0.6 — Gap coverage
+- **mouse:** `mouse position` — current cursor coordinates
+- **files:** `files exists` — check if path exists without listing directory, `files info` — file/directory metadata (size, dates, extension)
+- **app:** `app focus` — bring app to foreground by process name
+- **screen:** `screen waitgone` — wait for element to disappear, complements `screen wait`
+- **fix:** `pyautogui.FAILSAFE = False` — prevents cursor corner exception from killing the agent

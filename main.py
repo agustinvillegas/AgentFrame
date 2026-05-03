@@ -11,9 +11,11 @@ import sys
 import commands
 from core.response import AgentResponse
 from core.registry import registry
+import pyautogui
 
 VERSION = "0.5.0"
 PROMPT  = ">>> "
+pyautogui.FAILSAFE = False
 
 # ── Auto-discover and register all command modules ────────────────────────────
 for _, name, _ in pkgutil.iter_modules(commands.__path__):

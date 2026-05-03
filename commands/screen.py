@@ -594,3 +594,60 @@ def wait(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
         return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
     except Exception as e:
         return AgentResponse.failure(f"Wait failed: {e}")
+    
+@registry.register(
+    group="screen",
+    name="waitgone",
+    description=(
+        "Wait until a UI element with the given text disappears from screen. "
+        "Use after triggering an action that should close a dialog, spinner, or loading state."
+    ),
+    params=[
+        CommandParam("text",     "string", True,  None, "Text to wait for disappearance (case-insensitive partial match)"),
+        CommandParam("timeout",  "int",    False, 10,   "Max seconds to wait before giving up"),
+        CommandParam("interval", "float",  False, 0.5,  "How often to check, in seconds"),
+    ]
+)
+def waitgone(text: str, timeout: int = 10, interval: float = 0.5) -> AgentResponse:
+    try:
+        import time
+        from pywinauto import Desktop
+
+        text_lower = text.lower()
+        elapsed    = 0.0
+
+        while elapsed < timeout:
+            found = False
+            try:
+                active = Desktop(backend="uia").active()
+                if active:
+                    for ctrl in active.descendants():
+                        try:
+                            label = (ctrl.element_info.name or "").strip()
+                            if text_lower in label.lower():
+                                found = True
+                                break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            if not found:
+                return AgentResponse.success({
+                    "gone":      True,
+                    "elapsed_s": round(elapsed, 1),
+                })
+
+            time.sleep(interval)
+            elapsed += interval
+
+        return AgentResponse.success({
+            "gone":      False,
+            "elapsed_s": round(elapsed, 1),
+            "timeout":   timeout,
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pywinauto not installed. Run: pip install pywinauto")
+    except Exception as e:
+        return AgentResponse.failure(f"Wait gone failed: {e}")

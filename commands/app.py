@@ -156,3 +156,62 @@ def list_apps(filter: str | None = None) -> AgentResponse:
         return AgentResponse.failure("psutil not installed. Run: pip install psutil")
     except Exception as e:
         return AgentResponse.failure(f"List failed: {e}")
+
+@registry.register(
+    group="app",
+    name="focus",
+    description="Bring an application to the foreground by process name.",
+    params=[
+        CommandParam("name", "string", True, None, "Process name (e.g. 'brave.exe', 'code.exe')"),
+    ]
+)
+def focus(name: str) -> AgentResponse:
+    try:
+        import psutil
+        import win32gui
+        import win32con
+
+        name_lower = name.lower().replace(".exe", "")
+
+        
+        target_pid = None
+        for proc in psutil.process_iter(["pid", "name"]):
+            proc_name = (proc.info["name"] or "").lower().replace(".exe", "")
+            if name_lower in proc_name:
+                target_pid = proc.info["pid"]
+                break
+
+        if not target_pid:
+            return AgentResponse.failure(f"No running process matching '{name}' found.")
+
+        # Buscar la ventana principal del proceso
+        target_hwnd = None
+        def _cb(hwnd, _):
+            nonlocal target_hwnd
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            if not win32gui.GetWindowText(hwnd):
+                return
+            import win32process
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid == target_pid:
+                target_hwnd = hwnd
+
+        win32gui.EnumWindows(_cb, None)
+
+        if not target_hwnd:
+            return AgentResponse.failure(f"Process '{name}' is running but has no visible window.")
+
+        win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(target_hwnd)
+        title = win32gui.GetWindowText(target_hwnd)
+
+        return AgentResponse.success(
+            {"focused": title, "pid": target_pid},
+            state_delta={"active_window": title, "last_action": f"focused {name}", "result": "app brought to foreground"}
+        )
+
+    except ImportError:
+        return AgentResponse.failure("pywin32 or psutil not installed.")
+    except Exception as e:
+        return AgentResponse.failure(f"Focus failed: {e}")

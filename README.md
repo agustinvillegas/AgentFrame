@@ -155,8 +155,15 @@ agentshell audio volume --set 60
 - **Fix:** `screen text/elements/find/wait/waitgone` — `_resolve_window` now excludes the shell process itself when no `--window` is specified, avoids capturing the terminal instead of the target app
 - **Fix:** `audio volume` — fallback to `IMMDeviceEnumerator` when `GetSpeakers().Activate()` fails, resolves pycaw version compatibility issue
 
-### v1.2 — Routines *(current)*
+### v1.2 — Routines 
 - **New group `routine`:** `routine set`, `routine get`, `routine list`, `routine delete`, `routine run`
 - User describes a routine in natural language, agent translates to shell commands and saves them
 - `routine run` executes saved commands directly — deterministic, zero token cost, no model interpretation needed
 - Routines stored in SQLite under the `routines` user memory category, persist across sessions
+
+### v1.3 — Credentials store *(current)*
+- **New group `credentials`:** `credentials set`, `credentials get`, `credentials list`, `credentials delete`
+- Values encrypted at rest using Fernet symmetric encryption (`cryptography` library)
+- Encryption key stored in `data/.secret.key` — excluded from git, auto-generated on first run
+- `credentials list` shows services and keys but never values
+- Agent can retrieve credentials to authenticate with external services without exposing secrets in conversation history

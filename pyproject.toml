@@ -21,6 +21,7 @@ dependencies    = [
     "pyaudio>=0.2.14",
     "windows-toasts>=1.2.0",
     "pyreadline3>=3.4.1",
+    "cryptography>=42.0.0",
 ]
 
 [project.scripts]

@@ -52,7 +52,13 @@ class MemoryStore:
                 key      TEXT NOT NULL,
                 value    TEXT NOT NULL,
                 PRIMARY KEY (category, key)
-                );                    
+                );                  
+                CREATE TABLE IF NOT EXISTS credentials (
+                service  TEXT NOT NULL,
+                key      TEXT NOT NULL,
+                value    TEXT NOT NULL,
+                PRIMARY KEY (service, key)
+                );  
             """)
 
     # ── Index ─────────────────────────────────────────────────────────────────
@@ -199,5 +205,56 @@ class MemoryStore:
                     "DELETE FROM user_data WHERE category=?",
                     (category,)
                 )
+
+def set_credential(self, service: str, key: str, value: str):
+    from core.crypto import encrypt
+    encrypted = encrypt(value)
+    with self._lock, self._conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO credentials (service, key, value) VALUES (?,?,?)",
+            (service.lower(), key.lower(), encrypted)
+        )
+
+def get_credential(self, service: str, key: str) -> str | None:
+    from core.crypto import decrypt
+    with self._lock, self._conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM credentials WHERE service=? AND key=?",
+            (service.lower(), key.lower())
+        ).fetchone()
+    if not row:
+        return None
+    return decrypt(row["value"])
+
+def list_credentials(self, service: str | None = None) -> dict:
+    with self._lock, self._conn() as conn:
+        if service:
+            rows = conn.execute(
+                "SELECT service, key FROM credentials WHERE service=?",
+                (service.lower(),)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT service, key FROM credentials"
+            ).fetchall()
+    result: dict = {}
+    for r in rows:
+        if r["service"] not in result:
+            result[r["service"]] = []
+        result[r["service"]].append(r["key"])
+    return result
+
+def delete_credential(self, service: str, key: str | None = None):
+    with self._lock, self._conn() as conn:
+        if key:
+            conn.execute(
+                "DELETE FROM credentials WHERE service=? AND key=?",
+                (service.lower(), key.lower())
+            )
+        else:
+            conn.execute(
+                "DELETE FROM credentials WHERE service=?",
+                (service.lower(),)
+            )
 
 store = MemoryStore()

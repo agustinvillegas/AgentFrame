@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-
+import socket
 
 class AgentShellClient:
     """
@@ -21,26 +21,32 @@ class AgentShellClient:
             [sys.executable, str(self._shell_path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,  # capturar stderr separado
             text=True,
             bufsize=1,
         )
-        # Consumir la línea de bienvenida
-        self._proc.stdout.readline()
+        import time
+        time.sleep(2.0)  # esperar inicialización completa
 
     def run(self, command: str) -> dict:
-        """
-        Send a command to the shell and return the parsed JSON response.
-        Returns {"ok": false, "error": "..."} on failure.
-        """
         if not self._proc or self._proc.poll() is not None:
             self._start()
 
         try:
             self._proc.stdin.write(command + "\n")
             self._proc.stdin.flush()
-            line = self._proc.stdout.readline()
-            return json.loads(line.strip())
+        
+            # Leer hasta encontrar una línea JSON válida
+            while True:
+                line = self._proc.stdout.readline()
+                if not line:
+                    return {"ok": False, "error": "Shell process died"}
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("{"):
+                    return json.loads(line)
+            # Línea no JSON (logs del listener, etc.) — ignorar
         except Exception as e:
             return {"ok": False, "error": f"Client error: {e}"}
 

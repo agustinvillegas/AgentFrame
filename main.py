@@ -56,7 +56,7 @@ if readline:
     readline.set_completer(_completer)
     readline.parse_and_bind("tab: complete")
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 PROMPT  = ">>> "
 pyautogui.FAILSAFE = False
 _VERBOSE = False
@@ -68,6 +68,7 @@ for _, name, _ in pkgutil.iter_modules(commands.__path__):
 
 # ── Memory session (optional — requires GROQ_API_KEY) ────────────────────────
 _memory = None
+NO_MEMORY = "--no-memory" in sys.argv
 
 def _launch_listener():
     """Launch the C# Listener as a background process if the exe exists."""

@@ -143,9 +143,14 @@ agentshell audio volume --set 60
 - **New:** `examples/` — reference integration scripts for Groq, OpenAI, and Anthropic showing the recommended agent loop pattern
 - Agent sends commands wrapped in ```shell blocks, shell returns JSON, agent continues — no framework-specific training needed
 
-### v1.1 — User memory *(current)*
+### v1.1 — User memory 
 - **New group `user`:** persistent key-value memory about the user, organized in fixed categories
 - Categories: `preferences`, `environment`, `schedule`, `identity`, `projects`, `misc`
 - Commands: `user set`, `user get`, `user list`, `user delete`
 - Stored in SQLite alongside session memory — persists across sessions
 - Agent writes to memory as it learns about the user, reads it to personalize behavior
+
+### v1.1.1 — Bug fixes *(current)*
+- **Fix:** `app focus` — now collects all PIDs matching the process name before searching for a visible window, resolves multi-instance apps like Brave and Spotify
+- **Fix:** `screen text/elements/find/wait/waitgone` — `_resolve_window` now excludes the shell process itself when no `--window` is specified, avoids capturing the terminal instead of the target app
+- **Fix:** `audio volume` — fallback to `IMMDeviceEnumerator` when `GetSpeakers().Activate()` fails, resolves pycaw version compatibility issue

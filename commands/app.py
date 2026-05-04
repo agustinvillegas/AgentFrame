@@ -190,37 +190,64 @@ def list_apps(filter: str | None = None) -> AgentResponse:
         CommandParam("name", "string", True, None, "Process name (e.g. 'brave.exe', 'code.exe')"),
     ]
 )
+
 def focus(name: str) -> AgentResponse:
     try:
         import psutil
         import win32gui
         import win32con
+        import win32process
 
         name_lower = name.lower().replace(".exe", "")
 
-        
-        target_pid = None
+        # Recopilar todos los PIDs que matchean
+        candidate_pids = set()
         for proc in psutil.process_iter(["pid", "name"]):
             proc_name = (proc.info["name"] or "").lower().replace(".exe", "")
             if name_lower in proc_name:
-                target_pid = proc.info["pid"]
-                break
+                candidate_pids.add(proc.info["pid"])
 
-        if not target_pid:
+        if not candidate_pids:
             return AgentResponse.failure(f"No running process matching '{name}' found.")
 
-        # Buscar la ventana principal del proceso
+        # Buscar ventana visible entre todos los candidatos
         target_hwnd = None
+        target_title = None
+
         def _cb(hwnd, _):
-            nonlocal target_hwnd
+            nonlocal target_hwnd, target_title
+            if target_hwnd:
+                return
             if not win32gui.IsWindowVisible(hwnd):
                 return
-            if not win32gui.GetWindowText(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if not title:
                 return
-            import win32process
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if pid == target_pid:
+            if pid in candidate_pids:
                 target_hwnd = hwnd
+                target_title = title
+
+        win32gui.EnumWindows(_cb, None)
+
+        if not target_hwnd:
+            return AgentResponse.failure(
+                f"Process '{name}' is running but has no visible window."
+            )
+
+        if win32gui.IsIconic(target_hwnd):
+            win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(target_hwnd)
+
+        return AgentResponse.success(
+            {"focused": target_title, "pid": list(candidate_pids)[0]},
+            state_delta={"active_window": target_title, "last_action": f"focused {name}", "result": "app brought to foreground"}
+        )
+
+    except ImportError:
+        return AgentResponse.failure("pywin32 or psutil not installed.")
+    except Exception as e:
+        return AgentResponse.failure(f"Focus failed: {e}")
 
         win32gui.EnumWindows(_cb, None)
 

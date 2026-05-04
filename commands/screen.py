@@ -644,8 +644,12 @@ def waitgone(text: str, timeout: int = 10, interval: float = 0.5, window: str | 
 
 def _resolve_window(window: str | None):
     import win32gui, win32con
+    import win32process
     import time
+    import os
     from pywinauto import Application
+
+    current_pid = os.getpid()
 
     if window:
         hwnd = None
@@ -665,19 +669,36 @@ def _resolve_window(window: str | None):
         win32gui.SetForegroundWindow(hwnd)
         time.sleep(0.3)
 
-        try:
-            app    = Application(backend="uia").connect(handle=hwnd)
-            active = app.window(handle=hwnd)
-            return active, None
-        except Exception as e:
-            return None, f"Could not connect to window: {e}"
     else:
+        # Sin --window: usar la ventana en foco excluyendo el proceso actual
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
             return None, "No active window found."
-        try:
-            app    = Application(backend="uia").connect(handle=hwnd)
-            active = app.window(handle=hwnd)
-            return active, None
-        except Exception as e:
-            return None, f"Could not access active window: {e}"
+
+        _, fgw_pid = win32process.GetWindowThreadProcessId(hwnd)
+        if fgw_pid == current_pid:
+            # El terminal tiene el foco — buscar la última ventana visible que no sea el shell
+            candidate = None
+            def _cb2(h, _):
+                nonlocal candidate
+                if candidate:
+                    return
+                if not win32gui.IsWindowVisible(h):
+                    return
+                if not win32gui.GetWindowText(h):
+                    return
+                _, pid = win32process.GetWindowThreadProcessId(h)
+                if pid != current_pid:
+                    candidate = h
+            win32gui.EnumWindows(_cb2, None)
+
+            if not candidate:
+                return None, "No suitable window found — specify --window."
+            hwnd = candidate
+
+    try:
+        app    = Application(backend="uia").connect(handle=hwnd)
+        active = app.window(handle=hwnd)
+        return active, None
+    except Exception as e:
+        return None, f"Could not access window: {e}"

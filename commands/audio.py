@@ -20,22 +20,58 @@ def volume(set: int | None = None) -> AgentResponse:
         import math
 
         devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        interface = devices.Activate(
+            IAudioEndpointVolume._iid_, CLSCTX_ALL, None
+        )
         vol = cast(interface, POINTER(IAudioEndpointVolume))
 
         if set is not None:
             level = max(0, min(100, set))
-            db = -65.25 if level == 0 else max(-65.25, 20 * math.log10(level / 100))
+            db    = -65.25 if level == 0 else max(-65.25, 20 * math.log10(level / 100))
             vol.SetMasterVolumeLevel(db, None)
             return AgentResponse.success(
                 {"volume": level},
                 state_delta={"volume": level}
             )
         else:
-            current_db = vol.GetMasterVolumeLevel()
+            current_db  = vol.GetMasterVolumeLevel()
             current_pct = 0 if current_db <= -65.25 else round(10 ** (current_db / 20) * 100)
-            muted = bool(vol.GetMute())
+            muted       = bool(vol.GetMute())
             return AgentResponse.success({"volume": current_pct, "muted": muted})
+
+    except AttributeError:
+        try:
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            from pycaw.api.mmdeviceapi import IMMDeviceEnumerator
+            import comtypes.client
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            import math
+
+            enumerator = comtypes.client.CreateObject(
+                "{BCDE0395-E52F-467C-8E3D-C4579291692E}",
+                interface=IMMDeviceEnumerator
+            )
+            device    = enumerator.GetDefaultAudioEndpoint(0, 1)
+            interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol       = cast(interface, POINTER(IAudioEndpointVolume))
+
+            if set is not None:
+                level = max(0, min(100, set))
+                db    = -65.25 if level == 0 else max(-65.25, 20 * math.log10(level / 100))
+                vol.SetMasterVolumeLevel(db, None)
+                return AgentResponse.success(
+                    {"volume": level},
+                    state_delta={"volume": level}
+                )
+            else:
+                current_db  = vol.GetMasterVolumeLevel()
+                current_pct = 0 if current_db <= -65.25 else round(10 ** (current_db / 20) * 100)
+                muted       = bool(vol.GetMute())
+                return AgentResponse.success({"volume": current_pct, "muted": muted})
+
+        except Exception as e:
+            return AgentResponse.failure(f"Volume operation failed: {e}")
 
     except ImportError:
         return AgentResponse.failure("pycaw not installed. Run: pip install pycaw comtypes")
@@ -77,52 +113,54 @@ def mute(state: bool | None = None) -> AgentResponse:
 
 @registry.register(
     group="audio",
-    name="devices",
-    description="List available audio devices. Use --type to filter by input or output.",
+    name="device",
+    description="Set the default audio device by index or name fragment.",
     params=[
-        CommandParam("type", "string", False, "output", "'output' for speakers/headphones, 'input' for microphones"),
+        CommandParam("name",  "string", False, None, "Partial device name to match"),
+        CommandParam("index", "int",    False, None, "Device index from 'audio devices'"),
+        CommandParam("type",  "string", False, "output", "'output' or 'input'"),
     ]
 )
-def devices(type: str = "output") -> AgentResponse:
+def device(name: str | None = None, index: int | None = None, type: str = "output") -> AgentResponse:
     try:
-        import pyaudio
+        import subprocess
+        if name is None and index is None:
+            return AgentResponse.failure("Provide --name or --index.")
 
-        pa        = pyaudio.PyAudio()
-        count     = pa.get_device_count()
-        result    = []
-        host_type = "output" if type == "output" else "input"
+        if name:
+            script = f"""
+            $device = Get-AudioDevice -List | Where-Object {{ $_.Type -eq '{type.capitalize()}' -and $_.Name -like '*{name}*' }} | Select-Object -First 1
+            if ($device) {{ Set-AudioDevice -Id $device.Id; Write-Output $device.Name }}
+            else {{ Write-Error 'Device not found' }}
+            """
+        else:
+            script = f"""
+            $device = (Get-AudioDevice -List | Where-Object {{ $_.Type -eq '{type.capitalize()}' }})[$index]
+            if ($device) {{ Set-AudioDevice -Id $device.Id; Write-Output $device.Name }}
+            else {{ Write-Error 'Device not found' }}
+            """
 
-        for i in range(count):
-            try:
-                info = pa.get_device_info_by_index(i)
-                # Filtrar por tipo
-                if host_type == "output" and info.get("maxOutputChannels", 0) == 0:
-                    continue
-                if host_type == "input" and info.get("maxInputChannels", 0) == 0:
-                    continue
+        result = subprocess.run(
+            ["powershell", "-Command", script],
+            capture_output=True, text=True, timeout=10
+        )
 
-                result.append({
-                    "index": i,
-                    "name":  info.get("name", f"Device {i}"),
-                    "channels": info.get("maxOutputChannels") if host_type == "output" else info.get("maxInputChannels"),
-                    "default_sr": int(info.get("defaultSampleRate", 0)),
-                })
-            except Exception:
-                continue
+        if result.returncode != 0 or result.stderr:
+            return AgentResponse.failure(
+                f"Could not set device. Ensure 'AudioDeviceCmdlets' is installed: "
+                f"Install-Module -Name AudioDeviceCmdlets"
+            )
 
-        pa.terminate()
+        set_name = result.stdout.strip()
+        return AgentResponse.success(
+            {"set": set_name, "type": type},
+            state_delta={"last_action": f"changed {type} device to {set_name}", "result": f"{type} device changed"}
+        )
 
-        return AgentResponse.success({
-            "devices": result,
-            "count":   len(result),
-            "type":    type,
-        })
-
-    except ImportError:
-        return AgentResponse.failure("pyaudio not installed. Run: pip install pyaudio")
+    except subprocess.TimeoutExpired:
+        return AgentResponse.failure("PowerShell timeout.")
     except Exception as e:
-        return AgentResponse.failure(f"Device enumeration failed: {e}")
-
+        return AgentResponse.failure(f"Device switch failed: {e}")
 
 @registry.register(
     group="audio",

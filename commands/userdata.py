@@ -3,7 +3,7 @@ from core.response import AgentResponse
 from core.registry import registry, CommandParam
 from memory.store import store
 
-VALID_CATEGORIES = {"preferences", "environment", "schedule", "identity", "projects", "misc"}
+VALID_CATEGORIES = {"preferences", "environment", "schedule", "identity", "projects", "misc", "routines"}
 
 
 @registry.register(

@@ -150,7 +150,13 @@ agentshell audio volume --set 60
 - Stored in SQLite alongside session memory — persists across sessions
 - Agent writes to memory as it learns about the user, reads it to personalize behavior
 
-### v1.1.1 — Bug fixes *(current)*
+### v1.2 — Bug fixes 
 - **Fix:** `app focus` — now collects all PIDs matching the process name before searching for a visible window, resolves multi-instance apps like Brave and Spotify
 - **Fix:** `screen text/elements/find/wait/waitgone` — `_resolve_window` now excludes the shell process itself when no `--window` is specified, avoids capturing the terminal instead of the target app
 - **Fix:** `audio volume` — fallback to `IMMDeviceEnumerator` when `GetSpeakers().Activate()` fails, resolves pycaw version compatibility issue
+
+### v1.2 — Routines *(current)*
+- **New group `routine`:** `routine set`, `routine get`, `routine list`, `routine delete`, `routine run`
+- User describes a routine in natural language, agent translates to shell commands and saves them
+- `routine run` executes saved commands directly — deterministic, zero token cost, no model interpretation needed
+- Routines stored in SQLite under the `routines` user memory category, persist across sessions

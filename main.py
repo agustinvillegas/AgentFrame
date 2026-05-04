@@ -56,7 +56,7 @@ if readline:
     readline.set_completer(_completer)
     readline.parse_and_bind("tab: complete")
 
-VERSION = "1.1.1"
+VERSION = "1.2"
 PROMPT  = ">>> "
 pyautogui.FAILSAFE = False
 _VERBOSE = False

@@ -6,3 +6,6 @@ config/api_keys.json
 listener/bin/
 listener/obj/
 data/.secret.key
+groq_agent.py
+simple_agent.py
+AgentFrame.sln

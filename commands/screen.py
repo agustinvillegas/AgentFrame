@@ -666,7 +666,15 @@ def _resolve_window(window: str | None):
 
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        win32gui.SetForegroundWindow(hwnd)
+        try:
+            import win32api
+            cur_tid = win32api.GetCurrentThreadId()
+            tgt_tid, _ = win32process.GetWindowThreadProcessId(hwnd)
+            win32api.AttachThreadInput(cur_tid, tgt_tid, True)
+            win32gui.SetForegroundWindow(hwnd)
+            win32api.AttachThreadInput(cur_tid, tgt_tid, False)
+        except Exception:
+            pass
         time.sleep(0.3)
 
     else:

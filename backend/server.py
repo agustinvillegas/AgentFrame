@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agentshell.client import AgentShellClient
 
 # ── Configuration ────────────────────────────────────────────────────────────
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "claude-sonnet-4-5-20250929"
 MAX_TURNS = 10
 MAX_TOKENS = 1024
 NO_CMD_RETRIES = 2
@@ -128,7 +128,7 @@ class AgentState:
         try:
             schema_result = self.shell.run("help --json")
             self._log_event({"type": "prime", "command": "help --json", "result": schema_result})
-            self.messages.append({"role": "user", "content": f"Command: help --json\nResult: {_truncate_result(schema_result)}"})
+            
         except Exception as e:
             self._log_event({"type": "prime_error", "command": "help --json", "error": str(e)})
 
@@ -136,14 +136,14 @@ class AgentState:
         try:
             ctx = self.shell.run("context get")
             self._log_event({"type": "prime", "command": "context get", "result": ctx})
-            self.messages.append({"role": "user", "content": f"Command: context get\nResult: {_truncate_result(ctx)}"})
+            
         except Exception as e:
             self._log_event({"type": "prime_error", "command": "context get", "error": str(e)})
 
         try:
             status = self.shell.run("listener status")
             self._log_event({"type": "prime", "command": "listener status", "result": status})
-            self.messages.append({"role": "user", "content": f"Command: listener status\nResult: {_truncate_result(status)}"})
+            
         except Exception as e:
             self._log_event({"type": "prime_error", "command": "listener status", "error": str(e)})
 
@@ -453,12 +453,22 @@ async def send_message(req: MessageRequest):
                 steps += 1
                 agent_state._log_event({"type": "command_result", "command": normalized_cmd, "result": result})
 
-                agent_state.messages.append(
-                    {
-                        "role": "user",
-                        "content": f"Command: {normalized_cmd}\nResult: {_truncate_result(result)}",
-                    }
-                )
+                img_b64 = (result.get("data") or {}).get("image_b64") if isinstance(result, dict) else None
+                if img_b64:
+                    agent_state.messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}},
+                        {"type": "text", "text": f"Screen capture result for: {normalized_cmd}"}
+                    ]
+                })
+                else:
+                    agent_state.messages.append(
+                {
+                    "role": "user",
+                    "content": f"Command: {normalized_cmd}\nResult: {_truncate_result(result)}",
+                }
+            )
 
                 if req.mode == "step":
                     ok = _is_ok(result)

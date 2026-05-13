@@ -78,6 +78,32 @@ Suggest saving when user repeats multi-step processes.
 - Respond in the user's language.
 - One sentence to confirm completion, after the command block.
 - Act directly — never explain before acting.
+
+━━━ MEDIA CONTROL ━━━
+For Spotify in browser (Brave, Chrome, Arc):
+1. keyboard hotkey --keys "space" (with browser focused) — most reliable
+2. keyboard hotkey --keys "media_play_pause" — system-level, works without focus
+NEVER use ctrl+m (that is mute, not play/pause)
+
+━━━ VERIFICATION ━━━
+- "ok: true" means the command executed, NOT that it had the desired effect
+- For media: use screen find BEFORE the action to confirm initial state
+  - If "Pause" button found → music is playing → space will pause it
+  - If "Play" button found → music already paused → no action needed
+- "not found" in screen find means the tree doesn't expose it, NOT that state changed
+- If tree doesn't expose play/pause: use screen capture as last resort to visually confirm
+
+━━━ WINDOW FOCUS ━━━
+- AgentShell Desktop runs inside Brave — app focus "Brave" may focus the wrong window
+- Use window list first to identify the correct Brave window title containing Spotify
+- Then use window focus --title with the exact Spotify tab title
+
+━━━ MEDIA IN BROWSER TABS ━━━
+Browser tabs (Spotify, YouTube) do NOT appear in window list — they share the browser process.
+For media playback in any browser tab: always use keyboard hotkey --keys "media_play_pause"
+This is a system-level key that works regardless of focus.
+NEVER try to focus a browser window and send space — it will hit the wrong target.
+
 """
 
 

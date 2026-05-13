@@ -77,16 +77,39 @@ def elements(filter: str | None = None, enabled_only: bool = False, window: str 
         raw_elements = []
         complete = True
 
-        try:
-            descendants = active.descendants()
-        except Exception as e:
-            return AgentResponse.success({
+# Run descendants() in a thread with timeout — Electron/Chromium windows
+# can crash the process via COM if enumerated without a safety net
+        _desc_result: list = []
+        _desc_error:  list = []
+
+        def _fetch_descendants():
+            try:
+                _desc_result.append(active.descendants())
+            except Exception as e:
+                _desc_error.append(str(e))
+
+        _t = threading.Thread(target=_fetch_descendants, daemon=True)
+        _t.start()
+        _t.join(timeout=4.0)
+
+        if _t.is_alive() or not _desc_result:
+            err_msg = _desc_error[0] if _desc_error else "timed out"
+            ocr = _ocr_active_window()
+            result = {
                 "elements": [],
                 "count":    0,
                 "window":   window_title,
                 "complete": False,
-                "note":     f"Accessibility Tree unavailable for this window: {e}",
-            })
+                "note":     (
+                    f"Accessibility Tree unavailable ({err_msg}). "
+                    "Common cause: Electron/Chromium windows. OCR attached as fallback."
+                ),
+            }
+            if ocr:
+                result["ocr"] = ocr
+            return AgentResponse.success(result)
+
+        descendants = _desc_result[0]
        
 
         for ctrl in descendants:

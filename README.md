@@ -161,9 +161,17 @@ agentshell audio volume --set 60
 - `routine run` executes saved commands directly — deterministic, zero token cost, no model interpretation needed
 - Routines stored in SQLite under the `routines` user memory category, persist across sessions
 
-### v1.3 — Credentials store *(current)*
+### v1.3 — Credentials store
 - **New group `credentials`:** `credentials set`, `credentials get`, `credentials list`, `credentials delete`
 - Values encrypted at rest using Fernet symmetric encryption (`cryptography` library)
 - Encryption key stored in `data/.secret.key` — excluded from git, auto-generated on first run
 - `credentials list` shows services and keys but never values
 - Agent can retrieve credentials to authenticate with external services without exposing secrets in conversation history
+
+### v1.4 — Overlay system  *(current)*
+- **New group `overlay`:** `overlay notify`, `overlay status`, `overlay confirm`, `overlay chat`
+- `overlay notify` — floating notification, auto-dismisses after configurable duration
+- `overlay status` — persistent indicator at top of screen showing agent activity, cleared with `overlay status` (no message)
+- `overlay confirm` — blocking Yes/No dialog, returns `{"confirmed": true/false}`
+- `overlay chat` — floating chat window with message history, supports agent/user sender roles
+- All visual constants extracted to `core/overlay_theme.py` — developers replace this file to apply custom themes without touching core logic

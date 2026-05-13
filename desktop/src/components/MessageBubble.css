@@ -1,0 +1,244 @@
+.message-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-bubble.user {
+  align-items: flex-end;
+}
+
+.message-bubble.agent {
+  align-items: flex-start;
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.message-header.user {
+  flex-direction: row-reverse;
+}
+
+.sender {
+  font-weight: 600;
+}
+
+.time {
+  opacity: 0.6;
+}
+
+.message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 70%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.message-bubble.user .message-content {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: white;
+  align-self: flex-end;
+}
+
+.message-bubble.user p {
+  color: white;
+}
+
+.message-content p {
+  margin: 0;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.error-box {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid var(--danger);
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #fca5a5;
+}
+
+.error-box strong {
+  color: var(--danger);
+}
+
+.command-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: 'Fira Code', monospace;
+}
+
+.message-bubble.user .command-box {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.message-bubble.user .command-header {
+  background: rgba(30, 64, 175, 0.5);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.command-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.message-bubble.user .command-label {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.command-label code {
+  color: var(--accent);
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.message-bubble.user .copy-btn {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.copy-btn:hover {
+  background: var(--border);
+  color: var(--accent);
+}
+
+.message-bubble.user .copy-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.command-text {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow-x: auto;
+  line-height: 1.4;
+}
+
+.message-bubble.user .command-text {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.result-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: 'Fira Code', monospace;
+}
+
+.message-bubble.user .result-box {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.result-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.message-bubble.user .result-toggle {
+  background: rgba(30, 64, 175, 0.5);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.result-toggle:hover {
+  background: var(--border);
+}
+
+.message-bubble.user .result-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.status {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status.ok {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success);
+}
+
+.status.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger);
+}
+
+.result-text {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-x: auto;
+  line-height: 1.4;
+}
+
+.message-bubble.user .result-text {
+  color: rgba(255, 255, 255, 0.7);
+}

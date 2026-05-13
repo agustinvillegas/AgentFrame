@@ -9,3 +9,13 @@ data/.secret.key
 groq_agent.py
 simple_agent.py
 AgentFrame.sln
+.env.example
+groq_api_key.json
+desktop/README.md
+VOICE_INTEGRATION.py
+DEVELOPMENT.md
+PROJECT_STRUCTURE.txt
+QUICKSTART.md
+setup.bat
+setup.sh
+DESKTOP_README.md

@@ -2,6 +2,12 @@ from __future__ import annotations
 from core.response import AgentResponse
 from core.registry import registry, CommandParam
 
+def _active_window_title() -> str:
+    try:
+        import win32gui
+        return win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "unknown"
+    except Exception:
+        return "unknown"
 
 @registry.register(
     group="mouse",
@@ -22,9 +28,16 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> AgentRe
         else:
             pyautogui.click(x, y, button=button)
         return AgentResponse.success(
-            {"x": x, "y": y, "button": button, "double": double},
-            state_delta={"last_click": {"x": x, "y": y, "button": button}}
-        )
+    {
+        "x":             x,
+        "y":             y,
+        "button":        button,
+        "double":        double,
+        "target_window": _active_window_title(),
+        "note":          "Click sent to target_window. ok:true means executed, not that it had effect. Verify outcome with screen find or screen active.",
+    },
+    state_delta={"last_click": {"x": x, "y": y, "button": button}}
+)
     except Exception as e:
         return AgentResponse.failure(f"Click failed: {e}")
 

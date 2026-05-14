@@ -3,6 +3,13 @@ from core.response import AgentResponse
 from core.registry import registry, CommandParam
 
 
+def _active_window_title() -> str:
+    try:
+        import win32gui
+        return win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "unknown"
+    except Exception:
+        return "unknown"
+
 @registry.register(
     group="keyboard",
     name="type",
@@ -23,14 +30,26 @@ def type_text(text: str, enter: bool = False) -> AgentResponse:
         if enter:
             time.sleep(0.05)
             pyautogui.press("enter")
-        return AgentResponse.success({"text": text[:80], "enter": enter})
+        return AgentResponse.success({
+    "text":          text[:80],
+    "enter":         enter,
+    "target_window": _active_window_title(),
+    "note":          "Text pasted to target_window. Verify it appeared with screen find or screen text.",
+})
+
     except ImportError:
         # Fallback without clipboard
         import pyautogui
         pyautogui.write(text, interval=0.03)
         if enter:
             pyautogui.press("enter")
-        return AgentResponse.success({"text": text[:80], "enter": enter})
+        return AgentResponse.success({
+    "text":          text[:80],
+    "enter":         enter,
+    "target_window": _active_window_title(),
+    "note":          "Text pasted to target_window. Verify it appeared with screen find or screen text.",
+})
+
     except Exception as e:
         return AgentResponse.failure(f"Type failed: {e}")
 
@@ -48,7 +67,11 @@ def hotkey(keys: str) -> AgentResponse:
         import pyautogui
         parts = [k.strip() for k in keys.split("+")]
         pyautogui.hotkey(*parts)
-        return AgentResponse.success({"keys": keys})
+        return AgentResponse.success({
+    "keys":          keys,
+    "target_window": _active_window_title(),
+    "note":          "Keypress sent to target_window. ok:true means executed, not that it had effect. Use screen find to verify if outcome matters.",
+})
     except Exception as e:
         return AgentResponse.failure(f"Hotkey failed: {e}")
 
@@ -67,6 +90,13 @@ def press(key: str, times: int = 1) -> AgentResponse:
         import pyautogui
         for _ in range(times):
             pyautogui.press(key)
-        return AgentResponse.success({"key": key, "times": times})
+        return AgentResponse.success({
+    "key":           key,
+    "times":         times,
+    "target_window": _active_window_title(),
+    "note":          "Keypress sent to target_window. ok:true means executed, not that it had effect. Use screen find to verify if outcome matters.",
+})
     except Exception as e:
         return AgentResponse.failure(f"Press failed: {e}")
+
+

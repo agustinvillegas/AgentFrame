@@ -9,6 +9,26 @@ def _active_window_title() -> str:
     except Exception:
         return "unknown"
 
+def _mouse_response(ok: bool, data: dict = None, error: str = "") -> AgentResponse:
+    """
+    Wrapper that enriches mouse responses with consistent metadata.
+    All mouse commands should use this to return responses.
+    """
+    if data is None:
+        data = {}
+    
+    meta = {
+        "target_window": _active_window_title(),
+        "note": "ok:true means click was sent, not that it had effect. Verify with screen find if outcome matters."
+                if ok
+                else "Click failed before reaching the OS. No action was sent.",
+    }
+    
+    if ok:
+        return AgentResponse.success({**data, **meta})
+    else:
+        return AgentResponse.failure(error, state_delta=meta)
+
 @registry.register(
     group="mouse",
     name="click",
@@ -27,19 +47,9 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> AgentRe
             pyautogui.doubleClick(x, y, button=button)
         else:
             pyautogui.click(x, y, button=button)
-        return AgentResponse.success(
-    {
-        "x":             x,
-        "y":             y,
-        "button":        button,
-        "double":        double,
-        "target_window": _active_window_title(),
-        "note":          "Click sent to target_window. ok:true means executed, not that it had effect. Verify outcome with screen find or screen active.",
-    },
-    state_delta={"last_click": {"x": x, "y": y, "button": button}}
-)
+        return _mouse_response(True, {"x": x, "y": y, "button": button, "double": double})
     except Exception as e:
-        return AgentResponse.failure(f"Click failed: {e}")
+        return _mouse_response(False, error=f"Click failed: {e}")
 
 
 @registry.register(
@@ -56,9 +66,9 @@ def move(x: int, y: int, duration: float = 0.1) -> AgentResponse:
     try:
         import pyautogui
         pyautogui.moveTo(x, y, duration=duration)
-        return AgentResponse.success({"x": x, "y": y})
+        return _mouse_response(True, {"x": x, "y": y, "duration": duration})
     except Exception as e:
-        return AgentResponse.failure(f"Move failed: {e}")
+        return _mouse_response(False, error=f"Move failed: {e}")
 
 
 @registry.register(
@@ -78,9 +88,9 @@ def scroll(amount: int, x: int | None = None, y: int | None = None) -> AgentResp
             pyautogui.scroll(amount, x=x, y=y)
         else:
             pyautogui.scroll(amount)
-        return AgentResponse.success({"amount": amount, "x": x, "y": y})
+        return _mouse_response(True, {"amount": amount, "x": x, "y": y})
     except Exception as e:
-        return AgentResponse.failure(f"Scroll failed: {e}")
+        return _mouse_response(False, error=f"Scroll failed: {e}")
 
 
 @registry.register(
@@ -99,6 +109,6 @@ def drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.3) -> AgentResp
     try:
         import pyautogui
         pyautogui.drag(x2 - x1, y2 - y1, duration=duration, startX=x1, startY=y1)
-        return AgentResponse.success({"from": [x1, y1], "to": [x2, y2]})
+        return _mouse_response(True, {"from": [x1, y1], "to": [x2, y2], "duration": duration})
     except Exception as e:
-        return AgentResponse.failure(f"Drag failed: {e}")
+        return _mouse_response(False, error=f"Drag failed: {e}")

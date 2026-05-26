@@ -10,6 +10,27 @@ def _active_window_title() -> str:
     except Exception:
         return "unknown"
 
+
+def _keyboard_response(ok: bool, data: dict = None, error: str = "") -> AgentResponse:
+    """
+    Wrapper that enriches keyboard responses with consistent metadata.
+    All keyboard commands should use this to return responses.
+    """
+    if data is None:
+        data = {}
+    
+    meta = {
+        "target_window": _active_window_title(),
+        "note": "ok:true means command was sent, not that it had effect. Verify with screen find if outcome matters."
+                if ok
+                else "Command failed before reaching the OS. No keypress was sent.",
+    }
+    
+    if ok:
+        return AgentResponse.success({**data, **meta})
+    else:
+        return AgentResponse.failure(error, state_delta=meta)
+
 @registry.register(
     group="keyboard",
     name="type",
@@ -30,12 +51,7 @@ def type_text(text: str, enter: bool = False) -> AgentResponse:
         if enter:
             time.sleep(0.05)
             pyautogui.press("enter")
-        return AgentResponse.success({
-    "text":          text[:80],
-    "enter":         enter,
-    "target_window": _active_window_title(),
-    "note":          "Text pasted to target_window. Verify it appeared with screen find or screen text.",
-})
+        return _keyboard_response(True, {"text": text[:80], "enter": enter})
 
     except ImportError:
         # Fallback without clipboard
@@ -43,15 +59,10 @@ def type_text(text: str, enter: bool = False) -> AgentResponse:
         pyautogui.write(text, interval=0.03)
         if enter:
             pyautogui.press("enter")
-        return AgentResponse.success({
-    "text":          text[:80],
-    "enter":         enter,
-    "target_window": _active_window_title(),
-    "note":          "Text pasted to target_window. Verify it appeared with screen find or screen text.",
-})
+        return _keyboard_response(True, {"text": text[:80], "enter": enter})
 
     except Exception as e:
-        return AgentResponse.failure(f"Type failed: {e}")
+        return _keyboard_response(False, error=f"Type failed: {e}")
 
 
 @registry.register(
@@ -67,13 +78,9 @@ def hotkey(keys: str) -> AgentResponse:
         import pyautogui
         parts = [k.strip() for k in keys.split("+")]
         pyautogui.hotkey(*parts)
-        return AgentResponse.success({
-    "keys":          keys,
-    "target_window": _active_window_title(),
-    "note":          "Keypress sent to target_window. ok:true means executed, not that it had effect. Use screen find to verify if outcome matters.",
-})
+        return _keyboard_response(True, {"keys": keys})
     except Exception as e:
-        return AgentResponse.failure(f"Hotkey failed: {e}")
+        return _keyboard_response(False, error=f"Hotkey failed: {e}")
 
 
 @registry.register(
@@ -90,13 +97,8 @@ def press(key: str, times: int = 1) -> AgentResponse:
         import pyautogui
         for _ in range(times):
             pyautogui.press(key)
-        return AgentResponse.success({
-    "key":           key,
-    "times":         times,
-    "target_window": _active_window_title(),
-    "note":          "Keypress sent to target_window. ok:true means executed, not that it had effect. Use screen find to verify if outcome matters.",
-})
+        return _keyboard_response(True, {"key": key, "times": times})
     except Exception as e:
-        return AgentResponse.failure(f"Press failed: {e}")
+        return _keyboard_response(False, error=f"Press failed: {e}")
 
 

@@ -40,7 +40,18 @@ class AgentShellClient:
             while True:
                 line = self._proc.stdout.readline()
                 if not line:
-                    return {"ok": False, "error": "Shell process died"}
+                    stderr_out = ""
+                    try:
+                        import select
+                        if select.select([self._proc.stderr], [], [], 0.5)[0]:
+                            stderr_out = self._proc.stderr.read(4096)
+                    except Exception:
+                        try:
+                            stderr_out = self._proc.stderr.read(4096)
+                        except Exception:
+                            pass
+                    return {"ok": False, "error": "Shell process died", "stderr": stderr_out}
+                
                 line = line.strip()
                 if not line:
                     continue

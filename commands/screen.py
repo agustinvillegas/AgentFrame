@@ -1,8 +1,12 @@
 from __future__ import annotations
 import base64
 import io
+import json as _json
+import uuid
 from core.response import AgentResponse
 from core.registry import registry, CommandParam
+from core.vision import detect_ui_elements, is_available as vision_available
+from memory.store import store
 import threading
 
 from pywinauto import Desktop
@@ -105,8 +109,21 @@ def elements(filter: str | None = None, enabled_only: bool = False, window: str 
                     "Common cause: Electron/Chromium windows. OCR attached as fallback."
                 ),
             }
-            if ocr:
+            if ocr and ocr.get("elements"):
                 result["ocr"] = ocr
+                for el in ocr["elements"]:
+                    text = el.get("text", "").strip()
+                    center = el.get("center")
+                    if text and center:
+                        _auto_register_entity(
+                            label=text,
+                            bounds={"left": center[0]-20, "top": center[1]-10,
+                                    "right": center[0]+20, "bottom": center[1]+10,
+                                    "center": center},
+                            window_title=window_title,
+                            source="ocr",
+                            confidence=el.get("confidence", 0.5),
+                        )
             return AgentResponse.success(result)
 
         descendants = _desc_result[0]
@@ -199,6 +216,17 @@ def elements(filter: str | None = None, enabled_only: bool = False, window: str 
                 "Accessibility Tree incomplete. OCR description attached. "
                 "Request 'screen capture' only if OCR is insufficient for your task."
             )
+
+        # Auto-register elements as entities for future reuse
+        for el in elements_out:
+            label = el.get("label", "").strip()
+            if label and el.get("bounds"):
+                _auto_register_entity(
+                    label=label,
+                    bounds=el["bounds"],
+                    window_title=window_title,
+                    source="accessibility",
+                )
 
         return AgentResponse.success(result)
 
@@ -362,6 +390,28 @@ def _ocr_active_window() -> dict:
             "count":       0,
         }
     
+def _auto_register_entity(
+    label: str, bounds: dict, window_title: str,
+    source: str, confidence: float = 1.0
+):
+    """Automatically register a detected element as a screen entity for future reuse."""
+    try:
+        entity_id = str(uuid.uuid4())
+        name = label.strip().lower().replace(" ", "_")
+        store.register_screen_entity(
+            entity_id=entity_id,
+            name=name,
+            llm_name=label.strip(),
+            window_title=window_title,
+            window_class="",
+            bounds=bounds,
+            source=source,
+            confidence=confidence,
+        )
+    except Exception:
+        pass
+
+
 @registry.register(
     group="screen",
     name="monitors",
@@ -407,7 +457,106 @@ def monitors() -> AgentResponse:
         return AgentResponse.failure("pywin32 not installed. Run: pip install pywin32")
     except Exception as e:
         return AgentResponse.failure(f"Monitor enumeration failed: {e}")
-    
+
+
+@registry.register(
+    group="screen",
+    name="detect",
+    description=(
+        "Locate UI elements visually using the local vision model (Locate Anything). "
+        "Provide a natural language prompt describing what to find. "
+        "Detected elements are auto-registered as entities for future reuse."
+    ),
+    params=[
+        CommandParam("prompt",     "string", True,  None,    "What to find (e.g. 'play button', 'search field', 'settings icon')"),
+        CommandParam("window",     "string", False, None,    "Window title to inspect. Omit for active window."),
+        CommandParam("threshold",  "float",  False, None,    "Confidence threshold 0-1. Defaults to AGENTSHELL_VISION_CONFIDENCE."),
+        CommandParam("auto_register", "bool", False, True,   "Auto-register detected elements as entities."),
+    ]
+)
+def detect(
+    prompt: str,
+    window: str | None = None,
+    threshold: float | None = None,
+    auto_register: bool = True,
+) -> AgentResponse:
+    try:
+        import pyautogui
+        import win32gui
+        import win32process
+
+        if window:
+            hwnd = None
+            def _cb(h, _):
+                nonlocal hwnd
+                if win32gui.IsWindowVisible(h):
+                    t = win32gui.GetWindowText(h)
+                    if window.lower() in t.lower():
+                        hwnd = h
+            win32gui.EnumWindows(_cb, None)
+            if not hwnd:
+                return AgentResponse.failure(f"No window matching '{window}' found.")
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            _, fgw_pid = win32process.GetWindowThreadProcessId(hwnd)
+            if fgw_pid != __import__("os").getpid():
+                win32gui.SetForegroundWindow(hwnd)
+            __import__("time").sleep(0.3)
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            window_title = win32gui.GetWindowText(hwnd)
+        else:
+            hwnd = win32gui.GetForegroundWindow()
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            window_title = win32gui.GetWindowText(hwnd) or "active window"
+
+        width  = right - left
+        height = bottom - top
+        if width <= 0 or height <= 0:
+            return AgentResponse.failure("Window has zero size.")
+
+        # Use --window or active window caption for entity registration
+        caption = window_title
+
+        img = pyautogui.screenshot(region=(left, top, width, height))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        img_bytes = buf.getvalue()
+
+        detections = detect_ui_elements(img_bytes, prompt, threshold)
+
+        # Map coordinates back to screen space
+        for d in detections:
+            d["bounds"]["left"]   += left
+            d["bounds"]["right"]  += left
+            d["bounds"]["top"]    += top
+            d["bounds"]["bottom"] += top
+            d["center"][0] += left
+            d["center"][1] += top
+
+            if auto_register:
+                _auto_register_entity(
+                    label=d["label"],
+                    bounds=d["bounds"],
+                    window_title=caption,
+                    source="locate_anything",
+                    confidence=d["confidence"],
+                )
+
+        return AgentResponse.success({
+            "detections": detections,
+            "count":      len(detections),
+            "prompt":     prompt,
+            "window":     caption,
+            "region":     {"left": left, "top": top, "width": width, "height": height},
+            "note":       None if detections else (f"Vision model found no '{prompt}' in '{caption}'. Try a different prompt or use screen capture."),
+        })
+
+    except ImportError:
+        return AgentResponse.failure("pyautogui or pywin32 not installed.")
+    except Exception as e:
+        return AgentResponse.failure(f"Detect failed: {e}")
+
+
 @registry.register(
     group="screen",
     name="find",
@@ -475,11 +624,27 @@ def find(text: str, type: str | None = None, enabled_only: bool = True, window: 
                 "count":   0,
             })
 
+        # Auto-register matched elements as entities
+        window_title = ""
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            window_title = win32gui.GetWindowText(hwnd)
+        except Exception:
+            pass
+        for m in matches:
+            if m.get("label") and m.get("bounds"):
+                _auto_register_entity(
+                    label=m["label"],
+                    bounds=m["bounds"],
+                    window_title=window_title,
+                    source="accessibility",
+                )
+
         return AgentResponse.success({
             "found":   True,
             "matches": matches,
             "count":   len(matches),
-            "first":   matches[0],  # el más conveniente para el agente
+            "first":   matches[0],
         })
 
     except ImportError:
@@ -663,7 +828,77 @@ def waitgone(text: str, timeout: int = 10, interval: float = 0.5, window: str | 
         })
     except Exception as e:
         return AgentResponse.failure(f"Wait gone failed: {e}")
-    
+
+
+@registry.register(
+    group="screen",
+    name="click_entity",
+    description=(
+        "Click a previously registered screen entity by its LLM-friendly name. "
+        "Resolves coordinates from memory — zero vision cost. "
+        "Uses active window for disambiguation when the same name exists in multiple windows."
+    ),
+    params=[
+        CommandParam("llm_name", "string", True,  None,  "Entity LLM name as used in entity register/get (e.g. 'play button')"),
+        CommandParam("window",   "string", False, None,  "Window title to disambiguate. Omit for active window."),
+        CommandParam("button",   "string", False, "left", "Mouse button: 'left', 'right', 'middle'"),
+    ]
+)
+def click_entity(llm_name: str, window: str | None = None, button: str = "left") -> AgentResponse:
+    try:
+        import pyautogui
+        import win32gui
+
+        window_title = window
+        if not window_title:
+            hwnd = win32gui.GetForegroundWindow()
+            window_title = win32gui.GetWindowText(hwnd) or "unknown"
+
+        entity = store.get_screen_entity(llm_name.strip(), window_title)
+        if not entity:
+            candidates = store.find_screen_entities(llm_name.strip())
+
+            if len(candidates) == 1:
+                entity = candidates[0]
+            elif len(candidates) > 1:
+                return AgentResponse.success({
+                    "clicked":    False,
+                    "ambiguous":  True,
+                    "candidates": candidates,
+                    "count":      len(candidates),
+                    "note":       f"Found {len(candidates)} entities matching '{llm_name}'. Specify --window or focus the target window.",
+                })
+            else:
+                return AgentResponse.failure(
+                    f"No entity found for '{llm_name}' in '{window_title}'. "
+                    "Use 'screen detect' or 'screen find' to discover and register it first."
+                )
+
+        store.update_screen_entity_hit(entity["entity_id"])
+        bounds = entity["bounds"]
+        cx = bounds.get("center", [bounds.get("left", 0) + bounds.get("right", 0) // 2, 0])[0]
+        cy = bounds.get("center", [0, bounds.get("top", 0) + bounds.get("bottom", 0) // 2])[1]
+
+        pyautogui.click(cx, cy, button=button)
+
+        return AgentResponse.success(
+            {
+                "clicked":      True,
+                "entity_name":  entity.get("name"),
+                "llm_name":     entity.get("llm_name"),
+                "x":            cx,
+                "y":            cy,
+                "window":       entity.get("window_title"),
+                "from_memory":  True,
+            },
+            state_delta={"last_action": f"clicked {entity.get('llm_name')} via entity memory", "result": "click executed from memorized coordinates"}
+        )
+
+    except ImportError:
+        return AgentResponse.failure("pyautogui not installed. Run: pip install pyautogui")
+    except Exception as e:
+        return AgentResponse.failure(f"Click entity failed: {e}")
+
 
 def _resolve_window(window: str | None):
     import win32gui, win32con

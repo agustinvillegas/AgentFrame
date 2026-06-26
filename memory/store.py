@@ -2,8 +2,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "memory.db"
@@ -58,7 +59,23 @@ class MemoryStore:
                 key      TEXT NOT NULL,
                 value    TEXT NOT NULL,
                 PRIMARY KEY (service, key)
-                );  
+                );
+                
+                CREATE TABLE IF NOT EXISTS screen_entities (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_id    TEXT NOT NULL UNIQUE,
+                    name         TEXT NOT NULL,
+                    llm_name     TEXT NOT NULL,
+                    window_title TEXT NOT NULL,
+                    window_class TEXT DEFAULT '',
+                    bounds       TEXT NOT NULL,
+                    source       TEXT NOT NULL DEFAULT 'locate_anything',
+                    confidence   REAL DEFAULT 1.0,
+                    created_at   TEXT NOT NULL,
+                    last_seen    TEXT NOT NULL,
+                    hit_count    INTEGER DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_entities_llm_window ON screen_entities(llm_name, window_title);
             """)
 
     # ── Index ─────────────────────────────────────────────────────────────────
@@ -206,55 +223,151 @@ class MemoryStore:
                     (category,)
                 )
 
-def set_credential(self, service: str, key: str, value: str):
-    from core.crypto import encrypt
-    encrypted = encrypt(value)
-    with self._lock, self._conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO credentials (service, key, value) VALUES (?,?,?)",
-            (service.lower(), key.lower(), encrypted)
-        )
+    # ── Credentials ────────────────────────────────────────────────────────────
 
-def get_credential(self, service: str, key: str) -> str | None:
-    from core.crypto import decrypt
-    with self._lock, self._conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM credentials WHERE service=? AND key=?",
-            (service.lower(), key.lower())
-        ).fetchone()
-    if not row:
-        return None
-    return decrypt(row["value"])
-
-def list_credentials(self, service: str | None = None) -> dict:
-    with self._lock, self._conn() as conn:
-        if service:
-            rows = conn.execute(
-                "SELECT service, key FROM credentials WHERE service=?",
-                (service.lower(),)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT service, key FROM credentials"
-            ).fetchall()
-    result: dict = {}
-    for r in rows:
-        if r["service"] not in result:
-            result[r["service"]] = []
-        result[r["service"]].append(r["key"])
-    return result
-
-def delete_credential(self, service: str, key: str | None = None):
-    with self._lock, self._conn() as conn:
-        if key:
+    def set_credential(self, service: str, key: str, value: str):
+        from core.crypto import encrypt
+        encrypted = encrypt(value)
+        with self._lock, self._conn() as conn:
             conn.execute(
-                "DELETE FROM credentials WHERE service=? AND key=?",
+                "INSERT OR REPLACE INTO credentials (service, key, value) VALUES (?,?,?)",
+                (service.lower(), key.lower(), encrypted)
+            )
+
+    def get_credential(self, service: str, key: str) -> str | None:
+        from core.crypto import decrypt
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM credentials WHERE service=? AND key=?",
                 (service.lower(), key.lower())
+            ).fetchone()
+        if not row:
+            return None
+        return decrypt(row["value"])
+
+    def list_credentials(self, service: str | None = None) -> dict:
+        with self._lock, self._conn() as conn:
+            if service:
+                rows = conn.execute(
+                    "SELECT service, key FROM credentials WHERE service=?",
+                    (service.lower(),)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT service, key FROM credentials"
+                ).fetchall()
+        result: dict = {}
+        for r in rows:
+            if r["service"] not in result:
+                result[r["service"]] = []
+            result[r["service"]].append(r["key"])
+        return result
+
+    def delete_credential(self, service: str, key: str | None = None):
+        with self._lock, self._conn() as conn:
+            if key:
+                conn.execute(
+                    "DELETE FROM credentials WHERE service=? AND key=?",
+                    (service.lower(), key.lower())
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM credentials WHERE service=?",
+                    (service.lower(),)
+                )
+
+    # ── Screen entities ───────────────────────────────────────────────────────
+
+    def register_screen_entity(
+        self, entity_id: str, name: str, llm_name: str,
+        window_title: str, window_class: str, bounds: dict,
+        source: str, confidence: float
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """INSERT OR REPLACE INTO screen_entities
+                   (entity_id, name, llm_name, window_title, window_class,
+                    bounds, source, confidence, created_at, last_seen, hit_count)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                (entity_id, name, llm_name, window_title, window_class,
+                 json.dumps(bounds), source, confidence, now, now)
             )
-        else:
+            return cur.lastrowid
+
+    def get_screen_entity(self, llm_name: str, window_title: str) -> dict | None:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM screen_entities WHERE llm_name=? AND window_title=?",
+                (llm_name, window_title)
+            ).fetchone()
+        if not row:
+            return None
+        return self._screen_entity_row(row)
+
+    def find_screen_entities(
+        self, llm_name: str, window_title: str | None = None
+    ) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            if window_title:
+                rows = conn.execute(
+                    "SELECT * FROM screen_entities WHERE llm_name LIKE ? AND window_title=?",
+                    (f"%{llm_name}%", window_title)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM screen_entities WHERE llm_name LIKE ?",
+                    (f"%{llm_name}%",)
+                ).fetchall()
+        return [self._screen_entity_row(r) for r in rows]
+
+    def list_screen_entities(self, window_title: str | None = None) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            if window_title:
+                rows = conn.execute(
+                    "SELECT * FROM screen_entities WHERE window_title LIKE ? ORDER BY last_seen DESC",
+                    (f"%{window_title}%",)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM screen_entities ORDER BY last_seen DESC"
+                ).fetchall()
+        return [self._screen_entity_row(r) for r in rows]
+
+    def update_screen_entity_hit(self, entity_id: str):
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._lock, self._conn() as conn:
             conn.execute(
-                "DELETE FROM credentials WHERE service=?",
-                (service.lower(),)
+                "UPDATE screen_entities SET hit_count = hit_count + 1, last_seen=? WHERE entity_id=?",
+                (now, entity_id)
             )
+
+    def update_screen_entity_bounds(self, entity_id: str, bounds: dict):
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE screen_entities SET bounds=?, last_seen=? WHERE entity_id=?",
+                (json.dumps(bounds), now, entity_id)
+            )
+
+    def update_screen_entity_llm_name(self, entity_id: str, llm_name: str):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE screen_entities SET llm_name=? WHERE entity_id=?",
+                (llm_name, entity_id)
+            )
+
+    def delete_screen_entity(self, entity_id: str):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "DELETE FROM screen_entities WHERE entity_id=?",
+                (entity_id,)
+            )
+
+    @staticmethod
+    def _screen_entity_row(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["bounds"] = json.loads(d["bounds"])
+        return d
 
 store = MemoryStore()

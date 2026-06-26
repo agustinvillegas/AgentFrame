@@ -22,6 +22,8 @@ dependencies    = [
     "windows-toasts>=1.2.0",
     "pyreadline3>=3.4.1",
     "cryptography>=42.0.0",
+    "llama-cpp-python>=0.2.0",
+    "huggingface-hub>=0.20.0",
 ]
 
 [project.scripts]

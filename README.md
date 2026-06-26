@@ -168,10 +168,32 @@ agentshell audio volume --set 60
 - `credentials list` shows services and keys but never values
 - Agent can retrieve credentials to authenticate with external services without exposing secrets in conversation history
 
-### v1.4 — Overlay system  *(current)*
+### v1.4 — Overlay system  *(previous)*
 - **New group `overlay`:** `overlay notify`, `overlay status`, `overlay confirm`, `overlay chat`
 - `overlay notify` — floating notification, auto-dismisses after configurable duration
 - `overlay status` — persistent indicator at top of screen showing agent activity, cleared with `overlay status` (no message)
 - `overlay confirm` — blocking Yes/No dialog, returns `{"confirmed": true/false}`
 - `overlay chat` — floating chat window with message history, supports agent/user sender roles
 - All visual constants extracted to `core/overlay_theme.py` — developers replace this file to apply custom themes without touching core logic
+
+### v1.6 — Florence-2 vision backend  *(current)*
+- **Vision backend rewritten:** replaced LocateAnything-3B (GGUF + safetensors) with `florence-community/Florence-2-base` (231M params, ~1.6GB)
+- **Built-in transformers class:** uses `Florence2ForConditionalGeneration` (transformers 4.57.6+), no `trust_remote_code` needed
+- **Task prompt `<OPEN_VOCABULARY_DETECTION>`** — open-vocabulary detection with pixel-coordinate bboxes, no 0-1000 normalization
+- **GGUF path removed:** `llama-cpp-python` mmproj silently ignored in 0.3.18; mtmd.dll does not support `locateanything` projector type
+- **Performance:** ~1-2s inference on GTX 1050 Ti 4GB, ~2.5GB VRAM peak
+- **Dependencies:** removed `llama-cpp-python` soft dependency; added `einops`, `timm`
+
+### v1.5 — Visual grounding & Screen Entity Memory
+- **Perception pipeline upgraded:** Accessibility Tree → OCR → Vision → raw capture (each fallback triggers only when prior layer is insufficient)
+- **New command `screen detect`** — locate UI elements by natural language prompt: `screen detect --prompt "play button" --window "Spotify"`
+- **New group `entity`:** persistent screen entity registry with LLM-friendly names
+  - `entity register` — save element with `llm_name` (e.g. "botón play"), window, bounds, detection source
+  - `entity get` — resolve by `llm_name` + optional window, returns coordinates for direct click
+  - `entity find` — partial name search across windows
+  - `entity list` / `entity delete` / `entity update` — management
+- **Auto-registration:** successful detections from `screen elements`, `screen detect`, `screen find` automatically stored as entities
+- **New command `screen click_entity`** — click by `llm_name` using memorized coordinates, zero vision cost on repeat
+- **Disambiguation by window:** same `llm_name` across different windows resolved via `active_window` context or explicit `--window`
+- **New SQLite table `screen_entities`** — UUID stable ID, hit count, `last_seen`, source tracking (accessibility / ocr / locate_anything / manual)
+- **Dependencies added:** `llama-cpp-python`, `huggingface-hub`

@@ -1,0 +1,4 @@
+agentshell
+commands
+core
+memory

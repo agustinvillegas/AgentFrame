@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: agentshell
+Version: 0.1.0
+Summary: Agent-oriented PC control shell
+Requires-Python: >=3.11
+Requires-Dist: pyautogui>=0.9.54
+Requires-Dist: pyperclip>=1.8.2
+Requires-Dist: pycaw>=20230407
+Requires-Dist: comtypes>=1.2.0
+Requires-Dist: pywin32>=306
+Requires-Dist: pywinauto>=0.6.8
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: psutil>=5.9.0
+Requires-Dist: groq>=0.9.0
+Requires-Dist: easyocr>1.7.0
+Requires-Dist: pyaudio>=0.2.14
+Requires-Dist: windows-toasts>=1.2.0
+Requires-Dist: pyreadline3>=3.4.1
+Requires-Dist: cryptography>=42.0.0

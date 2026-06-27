@@ -49,12 +49,24 @@ Groups: screen | mouse | keyboard | audio | window | app | clipboard | index | c
 
 ## Running
 
-Interactive REPL:
+### Terminal chat (agent + listener + chat) — recommended
+```
+python agent_chat.py               # start everything + chat
+python agent_chat.py --url http://...  # connect to running backend
+```
+
+### Agent (backend + listener) — headless
+```
+python agent_init.py
+python agent_init.py --frontend   # also start React UI
+```
+
+### Interactive REPL (shell only)
 ```
 python main.py
 ```
 
-Subprocess (single command):
+### Subprocess (single command)
 ```
 python main.py audio volume --set 60
 ```
@@ -67,7 +79,7 @@ agentshell audio volume --set 60
 
 ## Environment
 
-- `GROQ_API_KEY` — enables memory indexing (optional, shell works without it)
+- `GROQ_API_KEY` — required for agent (main LLM + memory indexing)
 - Or place key in `config/api_keys.json` as `{"groq_api_key": "..."}`
 
 ---

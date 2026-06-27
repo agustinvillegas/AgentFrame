@@ -8,6 +8,7 @@ from core.registry import registry, CommandParam
 from core.vision import detect_ui_elements, is_available as vision_available
 from memory.store import store
 import threading
+from PIL import Image
 
 from pywinauto import Desktop
 import win32gui, win32con
@@ -29,12 +30,10 @@ _ocr_lock   = threading.Lock()
 )
 def capture(region: str = "active") -> AgentResponse:
     try:
-        import pyautogui
-
         if region == "active":
             img = _capture_active_window()
         else:
-            img = pyautogui.screenshot()
+            img = _screenshot_full()
 
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -262,25 +261,62 @@ def active_window() -> AgentResponse:
         return AgentResponse.failure(f"Active window query failed: {e}")
 
 
-def _capture_active_window():
-    """Captura la ventana activa independientemente del monitor en que esté."""
-    import pyautogui
+def _capture_region(left: int, top: int, width: int, height: int) -> Image.Image:
+    """Capture a screen region via mss (fast). Falls back to pyautogui."""
     try:
+        import mss
+        with mss.MSS() as sct:
+            monitor = {"left": left, "top": top, "width": width, "height": height}
+            sct_img = sct.grab(monitor)
+            return Image.frombytes("RGB", (sct_img.width, sct_img.height), sct_img.rgb)
+    except Exception:
+        import pyautogui
+        return pyautogui.screenshot(region=(left, top, width, height))
+
+
+def _screenshot_full() -> Image.Image:
+    """Full desktop screenshot via mss (fast). Falls back to pyautogui."""
+    try:
+        import mss
+        with mss.MSS() as sct:
+            monitor = sct.monitors[1]  # primary monitor
+            sct_img = sct.grab(monitor)
+            return Image.frombytes("RGB", (sct_img.width, sct_img.height), sct_img.rgb)
+    except Exception:
+        import pyautogui
+        return pyautogui.screenshot()
+
+
+def _capture_active_window() -> Image.Image:
+    """Captura la ventana activa independientemente del monitor en que esté."""
+    try:
+        import mss
         import win32gui
         hwnd = win32gui.GetForegroundWindow()
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-
-        # GetWindowRect devuelve coordenadas virtuales del escritorio
-        # que son correctas para capturas multi-monitor con pyautogui
         width  = right - left
         height = bottom - top
 
         if width <= 0 or height <= 0:
-            return pyautogui.screenshot()
+            return _screenshot_full()
 
-        return pyautogui.screenshot(region=(left, top, width, height))
-    except ImportError:
-        return pyautogui.screenshot()
+        with mss.MSS() as sct:
+            region = {"left": left, "top": top, "width": width, "height": height}
+            sct_img = sct.grab(region)
+            return Image.frombytes("RGB", (sct_img.width, sct_img.height), sct_img.rgb)
+    except Exception:
+        import pyautogui
+        try:
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            width  = right - left
+            height = bottom - top
+            if width <= 0 or height <= 0:
+                return pyautogui.screenshot()
+            return pyautogui.screenshot(region=(left, top, width, height))
+        except ImportError:
+            return pyautogui.screenshot()
 
 
 @registry.register(
@@ -299,12 +335,18 @@ def _capture_active_window():
 )
 def region(x: int, y: int, width: int, height: int) -> AgentResponse:
     try:
-        import pyautogui
-
         if width <= 0 or height <= 0:
             return AgentResponse.failure("Width and height must be greater than 0.")
 
-        img = pyautogui.screenshot(region=(x, y, width, height))
+        try:
+            import mss
+            with mss.MSS() as sct:
+                monitor = {"left": x, "top": y, "width": width, "height": height}
+                sct_img = sct.grab(monitor)
+                img = Image.frombytes("RGB", (sct_img.width, sct_img.height), sct_img.rgb)
+        except Exception:
+            import pyautogui
+            img = pyautogui.screenshot(region=(x, y, width, height))
 
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -338,22 +380,13 @@ def _ocr_active_window() -> dict:
     Devuelve texto estructurado con posición y confianza.
     """
     try:
-        import pyautogui
         import numpy as np
 
-        # Captura la ventana activa como array numpy
+        # Captura la ventana activa como PIL Image vía mss
         try:
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            width  = right - left
-            height = bottom - top
-            if width > 0 and height > 0:
-                img = pyautogui.screenshot(region=(left, top, width, height))
-            else:
-                img = pyautogui.screenshot()
+            img = _capture_active_window()
         except Exception:
-            img = pyautogui.screenshot()
+            img = _screenshot_full()
 
         img_np  = np.array(img)
         reader  = _get_ocr_reader()
@@ -472,6 +505,7 @@ def monitors() -> AgentResponse:
         CommandParam("window",     "string", False, None,    "Window title to inspect. Omit for active window."),
         CommandParam("threshold",  "float",  False, None,    "Confidence threshold 0-1. Defaults to AGENTSHELL_VISION_CONFIDENCE."),
         CommandParam("auto_register", "bool", False, True,   "Auto-register detected elements as entities."),
+        CommandParam("precise",    "bool",   False, False,   "Use the large/precise vision model (slower but more accurate)."),
     ]
 )
 def detect(
@@ -479,9 +513,9 @@ def detect(
     window: str | None = None,
     threshold: float | None = None,
     auto_register: bool = True,
+    precise: bool = False,
 ) -> AgentResponse:
     try:
-        import pyautogui
         import win32gui
         import win32process
 
@@ -517,12 +551,12 @@ def detect(
         # Use --window or active window caption for entity registration
         caption = window_title
 
-        img = pyautogui.screenshot(region=(left, top, width, height))
+        img = _capture_region(left, top, width, height)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         img_bytes = buf.getvalue()
 
-        detections = detect_ui_elements(img_bytes, prompt, threshold)
+        detections = detect_ui_elements(img_bytes, prompt, threshold, precise=precise)
 
         # Map coordinates back to screen space
         for d in detections:

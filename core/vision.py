@@ -1,8 +1,10 @@
 from __future__ import annotations
+import hashlib
 import json
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,11 +18,20 @@ logger = logging.getLogger("vision")
 # ── Model configuration ────────────────────────────────────────────────────
 # Backend: "auto" | "transformers" | "gguf"
 VISION_BACKEND = os.environ.get("AGENTSHELL_VISION_BACKEND", "auto")
-# HuggingFace model ID for transformers-based models (Florence-2, OWLViT, etc.)
+# Default fast model (base is 231M, ~0.5 GB VRAM, fast inference)
 VISION_MODEL_ID = os.environ.get(
     "AGENTSHELL_VISION_MODEL",
     "florence-community/Florence-2-base"
 )
+# Precise model used when --precise flag is set (large is 776M, ~1.5 GB VRAM)
+VISION_PRECISE_MODEL_ID = os.environ.get(
+    "AGENTSHELL_VISION_PRECISE_MODEL",
+    "florence-community/Florence-2-large"
+)
+# Downscale target — images larger than this on any axis get resized proportionally
+VISION_DOWNSCALE = int(os.environ.get("AGENTSHELL_VISION_DOWNSCALE", "512"))
+# Detection cache TTL in seconds
+CACHE_TTL = float(os.environ.get("AGENTSHELL_VISION_CACHE_TTL", "5.0"))
 # GGUF model settings (for llama-cpp-python multimodal support)
 VISION_GGUF_REPO = os.environ.get(
     "AGENTSHELL_VISION_REPO",
@@ -40,8 +51,12 @@ GPU_LAYERS = int(os.environ.get("AGENTSHELL_VISION_GPU_LAYERS", "20"))
 
 # ── Model state ────────────────────────────────────────────────────────────
 _model_lock = threading.Lock()
-_model_instance = None
+_model_instances: dict[str, tuple] = {}  # model_id -> (processor, model, device)
 _backend_used = None
+
+# ── Detection cache ────────────────────────────────────────────────────────
+_detection_cache: dict[str, tuple] = {}  # hash_key -> (timestamp, results)
+_cache_lock = threading.Lock()
 
 
 def is_available() -> bool:
@@ -74,14 +89,17 @@ def _is_gguf_available() -> bool:
         return False
 
 
-def _load_model():
-    global _model_instance, _backend_used
-    if _model_instance is not None:
-        return _model_instance, _backend_used
+def _load_model(precise: bool = False):
+    global _backend_used
+
+    model_id = VISION_PRECISE_MODEL_ID if precise else VISION_MODEL_ID
+
+    if model_id in _model_instances:
+        return _model_instances[model_id], _backend_used
 
     with _model_lock:
-        if _model_instance is not None:
-            return _model_instance, _backend_used
+        if model_id in _model_instances:
+            return _model_instances[model_id], _backend_used
 
         backend = VISION_BACKEND
 
@@ -98,25 +116,24 @@ def _load_model():
                 )
 
         if backend == "transformers":
-            _model_instance, _backend_used = _load_transformers()
+            instance, _backend_used = _load_transformers(model_id)
         elif backend == "gguf":
-            _model_instance, _backend_used = _load_gguf()
+            instance, _backend_used = _load_gguf()
         else:
             raise RuntimeError(f"Unknown vision backend: {backend}")
 
-        logger.info(f"Vision model loaded (backend={_backend_used})")
-        return _model_instance, _backend_used
+        _model_instances[model_id] = instance
+        logger.info(f"Vision model loaded (backend={_backend_used}, model={model_id})")
+        return instance, _backend_used
 
 
-def _load_transformers():
+def _load_transformers(model_id: str):
     """Load vision model via HuggingFace transformers."""
     from transformers import AutoProcessor, Florence2ForConditionalGeneration
     import torch
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Loading {VISION_MODEL_ID} on {device}...")
-
-    model_id = VISION_MODEL_ID
+    logger.info(f"Loading {model_id} on {device}...")
 
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=False)
 
@@ -135,6 +152,12 @@ def _load_transformers():
         ).to(device)
 
     model.eval()
+
+    try:
+        model = torch.compile(model, mode="reduce-overhead")
+        logger.info("torch.compile applied (reduce-overhead)")
+    except Exception as e:
+        logger.warning(f"torch.compile skipped: {e}")
 
     return (processor, model, device), "transformers"
 
@@ -220,6 +243,7 @@ def detect_ui_elements(
     image_bytes: bytes,
     prompt: str,
     threshold: float | None = None,
+    precise: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Detect UI elements in an image matching a text prompt.
@@ -228,6 +252,7 @@ def detect_ui_elements(
         image_bytes: PNG/JPEG screenshot bytes.
         prompt: Natural language query (e.g. "play button", "search field").
         threshold: Confidence threshold 0-1, defaults to AGENTSHELL_VISION_CONFIDENCE.
+        precise: If True, uses the large/precise model (slower but more accurate).
 
     Returns:
         [{"label": str, "confidence": float,
@@ -236,15 +261,31 @@ def detect_ui_elements(
     """
     conf = threshold if threshold is not None else MIN_CONFIDENCE
 
+    # Check detection cache
+    cache_key = hashlib.md5(
+        image_bytes + prompt.encode() + str(precise).encode() + str(conf).encode()
+    ).hexdigest()
+    with _cache_lock:
+        if cache_key in _detection_cache:
+            ts, cached = _detection_cache[cache_key]
+            if time.time() - ts < CACHE_TTL:
+                return cached
+
     try:
-        model, backend = _load_model()
+        model, backend = _load_model(precise=precise)
 
         if backend == "transformers":
-            return _run_transformers(model, image_bytes, prompt, conf)
+            results = _run_transformers(model, image_bytes, prompt, conf)
         elif backend == "gguf":
-            return _run_gguf(model, image_bytes, prompt, conf)
+            results = _run_gguf(model, image_bytes, prompt, conf)
         else:
-            return []
+            results = []
+
+        # Store in cache
+        with _cache_lock:
+            _detection_cache[cache_key] = (time.time(), results)
+
+        return results
 
     except Exception as e:
         logger.warning(f"Vision detection failed: {e}")
@@ -261,6 +302,15 @@ def _run_transformers(
     processor, model, device = model_tuple
     image = Image.open(_io.BytesIO(io_to_bytes(image_bytes))).convert("RGB")
     img_width, img_height = image.size
+
+    # Downscale to VISION_DOWNSCALE max dimension for speed
+    max_dim = VISION_DOWNSCALE
+    if img_width > max_dim or img_height > max_dim:
+        ratio = min(max_dim / img_width, max_dim / img_height)
+        new_w = int(img_width * ratio)
+        new_h = int(img_height * ratio)
+        image = image.resize((new_w, new_h), Image.LANCZOS)
+        img_width, img_height = image.size
 
     task_prompt = f"<OPEN_VOCABULARY_DETECTION>\n{prompt}"
 

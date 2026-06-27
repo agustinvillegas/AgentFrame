@@ -4,6 +4,7 @@ Exposes REST API for Electron frontend to interact with the AI agent
 """
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Literal
 import asyncio
@@ -14,13 +15,13 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import anthropic
+from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from agentshell.client import AgentShellClient
 
 # ── Configuration ────────────────────────────────────────────────────────────
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = "qwen/qwen3-32b"
 MAX_TURNS = 10
 MAX_TOKENS = 1024
 NO_CMD_RETRIES = 2
@@ -44,15 +45,30 @@ Use -- for flags. Do not add any other text when outputting a command.
 3. NEVER type or click without confirming focus
 
 ━━━ PERCEPTION ORDER ━━━
-1. screen find --text "..." --window "..."
-2. screen elements --window "..."
-3. screen text --window "..."
-4. screen capture --region active — last resort only
+1. screen find --text "..." --window "..." — accessibility tree, works best in native apps
+2. screen elements --window "..." — full accessibility tree
+3. screen text --window "..." — OCR text reading
+4. screen detect --prompt "..." — VISION MODEL (Florence-2), for finding UI elements visually. Use for buttons, icons, browser content, anything the accessibility tree misses. Returns pixel coordinates.
+5. mouse click --x <x> --y <y> — raw click after getting coordinates from screen detect
+6. screen capture --region active — last resort only (shows full screenshot to you)
 Always use --window. Omitting it captures the terminal, not the app.
+IMPORTANT: Browser tabs (Spotify, YouTube, Arc, Chrome) do NOT expose buttons in accessibility tree.
+For browser content: skip screen find → use screen detect directly.
+screen detect returns coordinates — then use mouse click to click them.
 
-PERCEPTION POLICY (ENFORCED)
-- Prefer screen elements, then screen find, then screen text.
-- Only use screen capture as a last resort, and only as screen capture --region active.
+━━━ USING screen detect ━━━
+- screen detect --prompt "a green play button" --window "WindowTitle"
+  Be SPECIFIC with prompts (describe color, shape, position if known).
+  Returns: [{"label": "button", "bounds": {"left":..., "top":..., "right":..., "bottom":...}, "center": [x, y]}]
+  If multiple results: check which element boundaries match the expected location.
+- Take the center coordinates and use: mouse click --x <center.x> --y <center.y>
+- Elements are auto-registered as entities for future use via: screen click_entity --name "play button"
+  screen click_entity clicks the last known coordinates (zero vision cost on repeat)
+
+━━━ CLICKING ━━━
+- screen click_entity --name "play button" — click by memorized name
+- mouse click --x 500 --y 300 — raw click at pixel coordinates
+- Always get coordinates from screen detect first
 
 ━━━ EXECUTION RULES ━━━
 - Complete ONLY what was asked. Stop immediately after ok:true.
@@ -83,28 +99,32 @@ Suggest saving when user repeats multi-step processes.
 
 ━━━ MEDIA CONTROL ━━━
 For Spotify in browser (Brave, Chrome, Arc):
-1. keyboard hotkey --keys "space" (with browser focused) — most reliable
-2. keyboard hotkey --keys "media_play_pause" — system-level, works without focus
+1. screen detect --prompt "play button" --window "Spotify" — use vision to find the button visually
+2. mouse click --x <x> --y <y> — click at the coordinates from screen detect
+3. keyboard hotkey --keys "space" — fallback if browser doesn't show controls
+4. keyboard hotkey --keys "media_play_pause" — system-level fallback
 NEVER use ctrl+m (that is mute, not play/pause)
 
 ━━━ VERIFICATION ━━━
 - "ok: true" means the command executed, NOT that it had the desired effect
-- For media: use screen find BEFORE the action to confirm initial state
-  - If "Pause" button found → music is playing → space will pause it
-  - If "Play" button found → music already paused → no action needed
-- "not found" in screen find means the tree doesn't expose it, NOT that state changed
-- If tree doesn't expose play/pause: use screen capture as last resort to visually confirm
+- For media: use screen detect to find play/pause button visually and confirm its state
+  - screen detect --prompt "pause button" → if found → music IS playing
+  - screen detect --prompt "play button" → if found → music IS paused
+  - screen detect works on browser content, screen find does not
+- "not found" in screen find means the tree doesn't expose it — use screen detect instead
+- If screen detect also fails: use screen capture --region active as last resort
 
 ━━━ WINDOW FOCUS ━━━
 - AgentShell Desktop runs inside Brave — app focus "Brave" may focus the wrong window
 - Use window list first to identify the correct Brave window title containing Spotify
 - Then use window focus --title with the exact Spotify tab title
 
-━━━ MEDIA IN BROWSER TABS ━━━
-Browser tabs (Spotify, YouTube) do NOT appear in window list — they share the browser process.
-For media playback in any browser tab: always use keyboard hotkey --keys "media_play_pause"
-This is a system-level key that works regardless of focus.
-NEVER try to focus a browser window and send space — it will hit the wrong target.
+━━━ BROWSER TABS ━━━
+Browser tabs (Spotify, YouTube) do NOT expose UI elements in accessibility tree.
+screen find and screen elements will always return empty for browser tab content.
+For buttons/controls in browser tabs: use screen detect (vision model) FIRST.
+screen detect returns pixel coordinates → mouse click to press them.
+Only use keyboard hotkey as fallback if screen detect can't find the element.
 
 """
 
@@ -130,7 +150,7 @@ app.add_middleware(
 # ── Global State ─────────────────────────────────────────────────────────────
 class AgentState:
     def __init__(self):
-        self.client: Optional[anthropic.Anthropic] = None
+        self.client: Optional[OpenAI] = None
         self.shell: Optional[AgentShellClient] = None
         self.messages: list[dict] = []
         self.compact_schema: str = ""
@@ -141,7 +161,7 @@ class AgentState:
 
     def init(self, api_key: str):
         """Initialize agent with API key"""
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
         self.shell = AgentShellClient()
         self.compact_schema, self.full_schema = self._build_schema()
         self.session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -346,24 +366,16 @@ def _is_ok(result: Optional[dict]) -> Optional[bool]:
 
 def _response_text(response) -> str:
     """
-    Extract text from Anthropic SDK response safely.
-    Avoids 'list index out of range' when content is empty or unexpected.
+    Extract text from OpenAI/Groq SDK response safely.
+    Strips any <think>...</think> reasoning blocks from Qwen3.
     """
+    import re as _re
     try:
-        content = getattr(response, "content", None)
-        if not content:
+        choice = getattr(response, "choices", None)
+        if not choice:
             return ""
-
-        # Anthropic SDK typically returns a list of content blocks; concatenate all text blocks.
-        parts: list[str] = []
-        for block in content:
-            text = getattr(block, "text", None)
-            if isinstance(text, str) and text.strip():
-                parts.append(text)
-            elif isinstance(block, str) and block.strip():
-                parts.append(block)
-
-        return "\n".join(parts).strip()
+        content = (choice[0].message.content or "").strip()
+        return _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
     except Exception:
         return ""
 
@@ -420,12 +432,30 @@ async def send_message(req: MessageRequest):
 
             context = _build_context(agent_state.messages, MAX_TURNS)
 
-            response = agent_state.client.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=context[0]["content"],
-                messages=context[1:],
-            )
+            if steps > 0:
+                time.sleep(2.5)
+
+            try:
+                response = agent_state.client.chat.completions.create(
+                    model=MODEL,
+                    max_tokens=MAX_TOKENS,
+                    temperature=0.3,
+                    messages=context,
+                )
+            except Exception as e:
+                err = str(e)
+                if "429" in err or "rate limit" in err.lower():
+                    friendly = "[Rate limit reached on Groq free tier (30 req/min). Please wait a moment and try again.]"
+                elif "timeout" in err.lower() or "timed out" in err.lower():
+                    friendly = "[Request timed out. Groq may be busy. Please try again.]"
+                else:
+                    raise
+                agent_state.messages.append({"role": "assistant", "content": friendly})
+                return MessageResponse(
+                    agent_reply=friendly,
+                    command_executed=command_executed,
+                    command_result=command_result,
+                )
 
             reply = _response_text(response)
             if not reply:
@@ -483,20 +513,19 @@ async def send_message(req: MessageRequest):
 
                 img_b64 = (result.get("data") or {}).get("image_b64") if isinstance(result, dict) else None
                 if img_b64:
-                    agent_state.messages.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}},
-                        {"type": "text", "text": f"Screen capture result for: {normalized_cmd}"}
-                    ]
-                })
+                    agent_state.messages.append(
+                        {
+                            "role": "user",
+                            "content": f"Screen capture result for: {normalized_cmd}"
+                        }
+                    )
                 else:
                     agent_state.messages.append(
-                {
-                    "role": "user",
-                    "content": f"Command: {normalized_cmd}\nResult: {_truncate_result(result)}",
-                }
-            )
+                        {
+                            "role": "user",
+                            "content": f"Command: {normalized_cmd}\nResult: {_truncate_result(result)}",
+                        }
+                    )
 
                 if req.mode == "step":
                     ok = _is_ok(result)

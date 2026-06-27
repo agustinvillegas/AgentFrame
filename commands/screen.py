@@ -910,8 +910,16 @@ def click_entity(llm_name: str, window: str | None = None, button: str = "left")
 
         store.update_screen_entity_hit(entity["entity_id"])
         bounds = entity["bounds"]
-        cx = bounds.get("center", [bounds.get("left", 0) + bounds.get("right", 0) // 2, 0])[0]
-        cy = bounds.get("center", [0, bounds.get("top", 0) + bounds.get("bottom", 0) // 2])[1]
+        center = bounds.get("center")
+        if center and len(center) == 2:
+            cx, cy = center
+        else:
+            left   = bounds.get("left", 0)
+            right  = bounds.get("right", 0)
+            top    = bounds.get("top", 0)
+            bottom = bounds.get("bottom", 0)
+            cx = (left + right) // 2
+            cy = (top + bottom) // 2
 
         pyautogui.click(cx, cy, button=button)
 
